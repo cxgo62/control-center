@@ -15,6 +15,7 @@ export async function probeTarget(url: string, proxyUrl: string): Promise<{ up: 
       ? new ProxyAgent(proxyUrl)
       : new Agent({ connect: { timeout: 8000 } });
     await fetch(url, {
+      method: 'HEAD',
       signal: AbortSignal.timeout(8000),
       dispatcher,
     });
