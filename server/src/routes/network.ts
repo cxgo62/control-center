@@ -5,6 +5,7 @@ import path from 'path';
 import { NET_TARGETS } from '../config.js';
 import { getNetProbes, getGroupStats, getSetting, setSetting, type NetProbe } from '../db.js';
 import { probeAll, probeTarget, getActiveProxyUrl } from '../prober.js';
+import { latestProbedAt } from './network-utils.js';
 
 function parseFlClashConfig(content: string) {
   const mixedPortMatch = content.match(/^mixed-port:\s*(\d+)/m);
@@ -134,9 +135,7 @@ export default async function networkRoutes(fastify: FastifyInstance) {
 
     // Most recent probe timestamp
     const allProbes = [...directProbes, ...proxyProbes];
-    const probedAt = allProbes.length > 0
-      ? Math.max(...allProbes.map(p => p.probed_at))
-      : now;
+    const probedAt = latestProbedAt(allProbes, now);
 
     return {
       direct,
