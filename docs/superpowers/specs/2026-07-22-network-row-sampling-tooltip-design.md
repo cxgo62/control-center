@@ -17,8 +17,8 @@ This change applies to the target rows rendered by `NetTargetRow` in the network
 
 ## Interaction and Presentation
 
-- Hovering or keyboard-focusing a target row shows a non-interactive tooltip above the row, centered horizontally.
-- Tooltip text is `采样时间 · 今天 HH:mm:ss` for today and an unambiguous local date-and-time for older samples.
+- Hovering a target row shows a non-interactive tooltip above the row, centered horizontally. Rows do not become keyboard-tab stops as part of this change.
+- Tooltip text is `采样时间 · 今天 HH:mm:ss` for today and `采样时间 · YYYY-MM-DD HH:mm:ss` for older samples.
 - The timestamp uses the browser's local timezone.
 - A row with no timestamp does not display a tooltip.
 - The tooltip is positioned and layered so it does not cover the row's measurements or become hidden behind neighboring rows or the parent card.
