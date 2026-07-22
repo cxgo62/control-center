@@ -205,8 +205,8 @@ function NetTargetRow({ t }: { t: NetDest }) {
         <Stat label="可用率" value={`${t.avail.toFixed(1)}%`} color={availColor(t.avail)} />
       </div>
 
-      {/* 色带：60% 宽 */}
-      <div style={{ width: '60%' }}>
+      {/* 色带与整卡 hover 时间轴共用同一宽度 */}
+      <div style={{ width: '100%' }}>
         <UptimeBar buckets={t.buckets} height={3} />
       </div>
     </div>
