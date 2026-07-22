@@ -49,6 +49,7 @@ export interface NetDest {
   group: string;
   up: boolean;
   latencyMs: number;
+  probedAt: number | null;
   avail: number;
   buckets: NetBucket[];
 }

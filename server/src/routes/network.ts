@@ -5,7 +5,7 @@ import path from 'path';
 import { NET_TARGETS } from '../config.js';
 import { getNetProbes, getGroupStats, getSetting, setSetting, type NetProbe } from '../db.js';
 import { probeAll, probeTarget, getActiveProxyUrl } from '../prober.js';
-import { latestProbedAt } from './network-utils.js';
+import { createLivePingEntry, latestProbedAt, latestProbeForTarget } from './network-utils.js';
 
 function parseFlClashConfig(content: string) {
   const mixedPortMatch = content.match(/^mixed-port:\s*(\d+)/m);
@@ -42,14 +42,16 @@ interface NetDestResponse {
   group: string;
   up: boolean;
   latencyMs: number;
+  probedAt: number | null;
   avail: number;
   buckets: BucketData[];
 }
 
-function buildBuckets(probes: NetProbe[], destId: string, sinceMs: number, nowMs: number): {
+export function buildBuckets(probes: NetProbe[], destId: string, sinceMs: number, nowMs: number): {
   buckets: BucketData[];
   up: boolean;
   latencyMs: number;
+  probedAt: number | null;
   avail: number;
 } {
   const bucketSize = (nowMs - sinceMs) / NET_BUCKETS;
@@ -80,11 +82,11 @@ function buildBuckets(probes: NetProbe[], destId: string, sinceMs: number, nowMs
   const avail = withData.length > 0 ? (withData.filter(b => b.up).length / withData.length) * 100 : 0;
 
   // 当前状态：取最近一次实际探测，而非最后一个桶（桶可能是空的）
-  const latestProbe = [...destProbes].sort((a, b) => b.probed_at - a.probed_at)[0];
+  const latestProbe = latestProbeForTarget(destProbes, destId);
   const currentUp = latestProbe ? latestProbe.up === 1 : false;
   const currentLatency = currentUp ? (latestProbe!.latency_ms ?? 0) : 0;
 
-  return { buckets, up: currentUp, latencyMs: currentLatency, avail };
+  return { buckets, up: currentUp, latencyMs: currentLatency, probedAt: latestProbe?.probed_at ?? null, avail };
 }
 
 export default async function networkRoutes(fastify: FastifyInstance) {
@@ -157,15 +159,15 @@ export default async function networkRoutes(fastify: FastifyInstance) {
     const proxyUrl = getActiveProxyUrl();
     const results = await Promise.allSettled(
       NET_TARGETS.flatMap(target => [
-        probeTarget(target.url, '').then(r => ({ id: target.id, path: 'direct' as const, group: target.group, ...r })),
-        probeTarget(target.url, proxyUrl).then(r => ({ id: target.id, path: 'proxy' as const, group: target.group, ...r })),
+        probeTarget(target.url, '').then(r => createLivePingEntry(target.id, 'direct', target.group, r, Date.now())),
+        probeTarget(target.url, proxyUrl).then(r => createLivePingEntry(target.id, 'proxy', target.group, r, Date.now())),
       ])
     );
-    const out: Record<string, Record<string, { up: boolean; latencyMs: number }>> = { direct: {}, proxy: {} };
+    const out: Record<string, Record<string, { up: boolean; latencyMs: number; probedAt: number }>> = { direct: {}, proxy: {} };
     for (const r of results) {
       if (r.status === 'fulfilled') {
-        const { id, path, up, latencyMs } = r.value;
-        out[path][id] = { up, latencyMs };
+        const { id, path, up, latencyMs, probedAt } = r.value;
+        out[path][id] = { up, latencyMs, probedAt };
       }
     }
     return out;

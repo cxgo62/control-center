@@ -2,6 +2,7 @@ import React from 'react';
 import type { NetworkData, NetDest, NetBucket } from '../types.js';
 import { api } from '../api.js';
 import { StatusDot, ToastStack, useToast, fmtAgo } from './Shared.js';
+import { formatSamplingTime } from './network-time.js';
 
 const NET_BUCKETS = 48;
 
@@ -142,10 +143,12 @@ function UptimeBar({ buckets, height = 8 }: UptimeBarProps) {
 
 // ---- Compact target row (for grid card) ----
 function NetTargetRow({ t }: { t: NetDest }) {
+  const [hovered, setHovered] = React.useState(false);
   const avgLat = React.useMemo(() => {
     const up = t.buckets.filter(b => b.hasData && b.up && b.latencyMs > 0);
     return up.length ? Math.round(up.reduce((s, b) => s + b.latencyMs, 0) / up.length) : 0;
   }, [t.buckets]);
+  const samplingTime = formatSamplingTime(t.probedAt);
 
   const Stat = ({ label, value, color }: { label: string; value: string; color?: string }) => (
     <div>
@@ -156,6 +159,7 @@ function NetTargetRow({ t }: { t: NetDest }) {
 
   return (
     <div style={{
+      position: 'relative', zIndex: hovered ? 2 : 1,
       background: 'rgba(255,255,255,.03)',
       border: '1px solid rgba(255,255,255,.06)',
       borderRadius: 7,
@@ -163,7 +167,23 @@ function NetTargetRow({ t }: { t: NetDest }) {
       display: 'flex',
       flexDirection: 'column',
       gap: 4,
-    }}>
+    }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+      {samplingTime && (
+        <div style={{
+          position: 'absolute', left: '50%', bottom: 'calc(100% + 7px)', transform: 'translateX(-50%)',
+          opacity: hovered ? 1 : 0, visibility: hovered ? 'visible' : 'hidden', transition: 'opacity .14s, visibility .14s',
+          pointerEvents: 'none', whiteSpace: 'nowrap', zIndex: 3,
+          background: '#252d3b', border: '1px solid rgba(255,255,255,.15)', borderRadius: 6,
+          padding: '6px 9px', color: '#e6edf3', fontSize: 11, lineHeight: 1,
+          fontFamily: '"JetBrains Mono",monospace', boxShadow: '0 8px 18px rgba(0,0,0,.35)',
+        }}>
+          {samplingTime}
+          <span style={{
+            position: 'absolute', top: '100%', left: '50%', marginLeft: -5,
+            border: '5px solid transparent', borderTopColor: '#252d3b',
+          }} />
+        </div>
+      )}
       {/* grid: [名称区 flex] [延迟 54px] [均值 54px] [可用率 50px] */}
       <div style={{
         display: 'grid',
@@ -206,7 +226,7 @@ function NetRegionCard({ title, sub, accent, path, targets, ticks }: NetRegionCa
     <div style={{
       background: '#10151d', border: '1px solid rgba(255,255,255,.07)',
       borderRadius: 16, padding: '16px 18px 12px',
-      display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden',
+      display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'visible',
     }}>
       {/* Card header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flex: 'none' }}>
@@ -631,7 +651,7 @@ function NetworkSidebar({ onProbe, probing, domestic, international }: NetworkSi
   );
 }
 
-type PingResult = Record<string, Record<string, { up: boolean; latencyMs: number }>>;
+type PingResult = Record<string, Record<string, { up: boolean; latencyMs: number; probedAt: number }>>;
 
 // ---- Main NetworkPage ----
 export function NetworkPage() {
@@ -741,7 +761,7 @@ export function NetworkPage() {
   const applyPing = (targets: typeof data.direct, path: 'direct' | 'proxy') =>
     targets.map(t => {
       const live = ping?.[path]?.[t.id];
-      return live ? { ...t, up: live.up, latencyMs: live.latencyMs } : t;
+      return live ? { ...t, up: live.up, latencyMs: live.latencyMs, probedAt: live.probedAt } : t;
     });
 
   const domestic      = applyPing(data.direct.filter(t => t.group === 'domestic'),      'direct');
