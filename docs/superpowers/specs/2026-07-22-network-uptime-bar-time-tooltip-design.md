@@ -6,13 +6,14 @@ Show the actual time interval represented by the hovered position in each networ
 
 ## Data Contract
 
-- Every uptime bucket returned by `GET /api/network/data` includes its server-calculated `startAt` and `endAt` timestamps in addition to `up`, `latencyMs`, and `hasData`.
-- The 48 buckets remain mutually contiguous and cover exactly the selected API range.
+- Every uptime bucket returned by `GET /api/network/data` includes its server-calculated `startAt` and `endAt` timestamps, expressed as Unix epoch milliseconds, in addition to `up`, `latencyMs`, and `hasData`.
+- The 48 buckets remain mutually contiguous and cover exactly the selected API range as half-open intervals `[startAt, endAt)`, except that the final bucket visually includes the range's right edge.
 
 ## Interaction
 
 - Only the uptime bar is hoverable for this feature; hovering other parts of a row shows no sampling-time bubble.
-- The pointer maps to one of the 48 rendered buckets. The tooltip displays that bucket's local-time interval as `HH:mm:ss–HH:mm:ss` when both endpoints are on the same day, otherwise an unambiguous date-and-time interval.
+- The pointer maps to one of the 48 rendered buckets by flooring its horizontal fraction times 48; an exact right-edge hover maps to the final bucket.
+- The tooltip uses the browser's local timezone and displays the bucket interval as `HH:mm:ss–HH:mm:ss` when both endpoints are on the same day; otherwise it uses `YYYY-MM-DD HH:mm:ss–YYYY-MM-DD HH:mm:ss`.
 - It also displays the bucket state: `正常` when data exists and is up, `断线` when data exists and is down, and `无数据` when no probe falls in that interval.
 - The tooltip is positioned above the hover point, does not alter layout, has no pointer events, and remains visible above neighboring rows.
 - The existing whole-row latest-sampling tooltip is removed.
