@@ -17,6 +17,13 @@ export function bucketIndexAtOffset(offsetX: number, width: number, count: numbe
   return Math.min(count - 1, Math.max(0, Math.floor(offsetX / width * count)));
 }
 
+export function cardHoverPosition(offsetX: number, cardWidth: number, inset: number, count: number): { index: number; x: number } {
+  const contentStart = inset;
+  const contentEnd = Math.max(contentStart, cardWidth - inset);
+  const x = Math.min(contentEnd, Math.max(contentStart, offsetX));
+  return { index: bucketIndexAtOffset(x - contentStart, contentEnd - contentStart, count), x };
+}
+
 export function formatBucketTooltip(bucket: NetBucket, _now = new Date()): string | null {
   if (!Number.isFinite(bucket.startAt) || !Number.isFinite(bucket.endAt)) return null;
   const start = new Date(bucket.startAt);

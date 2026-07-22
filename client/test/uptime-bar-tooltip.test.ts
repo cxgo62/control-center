@@ -1,11 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bucketIndexAtOffset, formatBucketTooltip } from '../src/components/uptime-bar-tooltip.js';
+import { bucketIndexAtOffset, cardHoverPosition, formatBucketTooltip } from '../src/components/uptime-bar-tooltip.js';
 
 test('maps bar offsets to the first, middle, and final buckets', () => {
   assert.equal(bucketIndexAtOffset(0, 240, 48), 0);
   assert.equal(bucketIndexAtOffset(120, 240, 48), 24);
   assert.equal(bucketIndexAtOffset(240, 240, 48), 47);
+});
+
+test('maps full-card hover positions through the card content bounds', () => {
+  assert.deepEqual(cardHoverPosition(0, 300, 10, 48), { index: 0, x: 10 });
+  assert.deepEqual(cardHoverPosition(150, 300, 10, 48), { index: 24, x: 150 });
+  assert.deepEqual(cardHoverPosition(300, 300, 10, 48), { index: 47, x: 290 });
 });
 
 test('formats same-day uptime intervals and their states', () => {

@@ -2,7 +2,7 @@ import React from 'react';
 import type { NetworkData, NetDest, NetBucket } from '../types.js';
 import { api } from '../api.js';
 import { StatusDot, ToastStack, useToast, fmtAgo } from './Shared.js';
-import { bucketIndexAtOffset, formatBucketTooltip } from './uptime-bar-tooltip.js';
+import { cardHoverPosition, formatBucketTooltip } from './uptime-bar-tooltip.js';
 
 const NET_BUCKETS = 48;
 
@@ -118,7 +118,6 @@ interface UptimeBarProps {
 }
 
 function UptimeBar({ buckets, height = 8 }: UptimeBarProps) {
-  const [hovered, setHovered] = React.useState<{ index: number; xPercent: number } | null>(null);
   if (buckets.length === 0) {
     return <div style={{ height, borderRadius: 4, background: 'rgba(255,255,255,.07)' }} />;
   }
@@ -132,24 +131,51 @@ function UptimeBar({ buckets, height = 8 }: UptimeBarProps) {
     const color = !b.hasData ? 'rgba(255,255,255,.10)' : b.up ? '#3fb950' : '#f15a4a';
     return [`${color} ${p1}`, `${color} ${p2}`];
   }).join(', ');
-  const tooltip = hovered ? formatBucketTooltip(buckets[hovered.index]) : null;
-
-  const handleMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const offsetX = event.clientX - rect.left;
-    const xPercent = Math.min(100, Math.max(0, offsetX / rect.width * 100));
-    setHovered({ index: bucketIndexAtOffset(offsetX, rect.width, buckets.length), xPercent });
-  };
 
   return (
     <div style={{
-      position: 'relative', height,
+      height,
       borderRadius: 4,
       background: `linear-gradient(to right, ${stops})`,
+    }} />
+  );
+}
+
+// ---- Compact target row (for grid card) ----
+function NetTargetRow({ t }: { t: NetDest }) {
+  const [hovered, setHovered] = React.useState<{ index: number; x: number } | null>(null);
+  const avgLat = React.useMemo(() => {
+    const up = t.buckets.filter(b => b.hasData && b.up && b.latencyMs > 0);
+    return up.length ? Math.round(up.reduce((s, b) => s + b.latencyMs, 0) / up.length) : 0;
+  }, [t.buckets]);
+  const tooltip = hovered ? formatBucketTooltip(t.buckets[hovered.index]) : null;
+
+  const handleMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setHovered(cardHoverPosition(event.clientX - rect.left, rect.width, 10, t.buckets.length));
+  };
+
+  const Stat = ({ label, value, color }: { label: string; value: string; color?: string }) => (
+    <div>
+      <div style={{ fontSize: 8, color: '#525a66', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 1 }}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: color ?? '#9aa5b3', fontFamily: '"JetBrains Mono",monospace', lineHeight: 1 }}>{value}</div>
+    </div>
+  );
+
+  return (
+    <div style={{
+      position: 'relative', zIndex: hovered ? 2 : 1,
+      background: 'rgba(255,255,255,.03)',
+      border: '1px solid rgba(255,255,255,.06)',
+      borderRadius: 7,
+      padding: '5px 9px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4,
     }} onMouseMove={handleMouseMove} onMouseLeave={() => setHovered(null)}>
       {tooltip && hovered && (
         <div style={{
-          position: 'absolute', left: `${hovered.xPercent}%`, bottom: 'calc(100% + 7px)', transform: 'translateX(-50%)',
+          position: 'absolute', left: hovered.x, bottom: 'calc(100% + 7px)', transform: 'translateX(-50%)',
           pointerEvents: 'none', whiteSpace: 'nowrap', zIndex: 3,
           background: '#252d3b', border: '1px solid rgba(255,255,255,.15)', borderRadius: 6,
           padding: '6px 9px', color: '#e6edf3', fontSize: 11, lineHeight: 1,
@@ -162,34 +188,6 @@ function UptimeBar({ buckets, height = 8 }: UptimeBarProps) {
           }} />
         </div>
       )}
-    </div>
-  );
-}
-
-// ---- Compact target row (for grid card) ----
-function NetTargetRow({ t }: { t: NetDest }) {
-  const avgLat = React.useMemo(() => {
-    const up = t.buckets.filter(b => b.hasData && b.up && b.latencyMs > 0);
-    return up.length ? Math.round(up.reduce((s, b) => s + b.latencyMs, 0) / up.length) : 0;
-  }, [t.buckets]);
-
-  const Stat = ({ label, value, color }: { label: string; value: string; color?: string }) => (
-    <div>
-      <div style={{ fontSize: 8, color: '#525a66', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 1 }}>{label}</div>
-      <div style={{ fontSize: 13, fontWeight: 700, color: color ?? '#9aa5b3', fontFamily: '"JetBrains Mono",monospace', lineHeight: 1 }}>{value}</div>
-    </div>
-  );
-
-  return (
-    <div style={{
-      background: 'rgba(255,255,255,.03)',
-      border: '1px solid rgba(255,255,255,.06)',
-      borderRadius: 7,
-      padding: '5px 9px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 4,
-    }}>
       {/* grid: [名称区 flex] [延迟 54px] [均值 54px] [可用率 50px] */}
       <div style={{
         display: 'grid',
