@@ -33,6 +33,8 @@ interface BucketData {
   up: boolean;
   latencyMs: number;
   hasData: boolean; // false = 该时段内无探测记录，不代表断线
+  startAt: number;
+  endAt: number;
 }
 
 interface NetDestResponse {
@@ -63,18 +65,18 @@ export function buildBuckets(probes: NetProbe[], destId: string, sinceMs: number
     const inBucket = destProbes.filter(p => p.probed_at >= bucketStart && p.probed_at < bucketEnd);
 
     if (inBucket.length === 0) {
-      return { up: false, latencyMs: 0, hasData: false }; // 无数据，不是断线
+      return { up: false, latencyMs: 0, hasData: false, startAt: bucketStart, endAt: bucketEnd }; // 无数据，不是断线
     }
 
     const upProbes = inBucket.filter(p => p.up === 1);
     if (upProbes.length === 0) {
-      return { up: false, latencyMs: 0, hasData: true }; // 有数据，真的断了
+      return { up: false, latencyMs: 0, hasData: true, startAt: bucketStart, endAt: bucketEnd }; // 有数据，真的断了
     }
 
     const avgLatency = Math.round(
       upProbes.reduce((sum, p) => sum + (p.latency_ms ?? 0), 0) / upProbes.length
     );
-    return { up: true, latencyMs: avgLatency, hasData: true };
+    return { up: true, latencyMs: avgLatency, hasData: true, startAt: bucketStart, endAt: bucketEnd };
   });
 
   // 可用率：只统计有实际数据的桶

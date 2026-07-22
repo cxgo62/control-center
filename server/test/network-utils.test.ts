@@ -40,3 +40,19 @@ test('buildBuckets exposes the latest persisted sampling timestamp', () => {
 
   assert.equal(result.probedAt, 2000);
 });
+
+test('buildBuckets returns contiguous bucket time bounds for the requested range', () => {
+  const result = buildBuckets([
+    { id: 1, dest_id: 'baidu', path: 'direct', up: 1, latency_ms: 100, probed_at: 1000 },
+  ], 'baidu', 0, 4800);
+
+  assert.deepEqual(
+    { startAt: result.buckets[0].startAt, endAt: result.buckets[0].endAt },
+    { startAt: 0, endAt: 100 },
+  );
+  assert.deepEqual(
+    { startAt: result.buckets[47].startAt, endAt: result.buckets[47].endAt },
+    { startAt: 4700, endAt: 4800 },
+  );
+  assert.equal(result.buckets[15].endAt, result.buckets[16].startAt);
+});

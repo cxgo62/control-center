@@ -2,7 +2,7 @@ import React from 'react';
 import type { NetworkData, NetDest, NetBucket } from '../types.js';
 import { api } from '../api.js';
 import { StatusDot, ToastStack, useToast, fmtAgo } from './Shared.js';
-import { formatSamplingTime } from './network-time.js';
+import { bucketIndexAtOffset, formatBucketTooltip } from './uptime-bar-tooltip.js';
 
 const NET_BUCKETS = 48;
 
@@ -118,6 +118,7 @@ interface UptimeBarProps {
 }
 
 function UptimeBar({ buckets, height = 8 }: UptimeBarProps) {
+  const [hovered, setHovered] = React.useState<{ index: number; xPercent: number } | null>(null);
   if (buckets.length === 0) {
     return <div style={{ height, borderRadius: 4, background: 'rgba(255,255,255,.07)' }} />;
   }
@@ -131,24 +132,46 @@ function UptimeBar({ buckets, height = 8 }: UptimeBarProps) {
     const color = !b.hasData ? 'rgba(255,255,255,.10)' : b.up ? '#3fb950' : '#f15a4a';
     return [`${color} ${p1}`, `${color} ${p2}`];
   }).join(', ');
+  const tooltip = hovered ? formatBucketTooltip(buckets[hovered.index]) : null;
+
+  const handleMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const offsetX = event.clientX - rect.left;
+    const xPercent = Math.min(100, Math.max(0, offsetX / rect.width * 100));
+    setHovered({ index: bucketIndexAtOffset(offsetX, rect.width, buckets.length), xPercent });
+  };
 
   return (
     <div style={{
-      height,
+      position: 'relative', height,
       borderRadius: 4,
       background: `linear-gradient(to right, ${stops})`,
-    }} />
+    }} onMouseMove={handleMouseMove} onMouseLeave={() => setHovered(null)}>
+      {tooltip && hovered && (
+        <div style={{
+          position: 'absolute', left: `${hovered.xPercent}%`, bottom: 'calc(100% + 7px)', transform: 'translateX(-50%)',
+          pointerEvents: 'none', whiteSpace: 'nowrap', zIndex: 3,
+          background: '#252d3b', border: '1px solid rgba(255,255,255,.15)', borderRadius: 6,
+          padding: '6px 9px', color: '#e6edf3', fontSize: 11, lineHeight: 1,
+          fontFamily: '"JetBrains Mono",monospace', boxShadow: '0 8px 18px rgba(0,0,0,.35)',
+        }}>
+          {tooltip}
+          <span style={{
+            position: 'absolute', top: '100%', left: '50%', marginLeft: -5,
+            border: '5px solid transparent', borderTopColor: '#252d3b',
+          }} />
+        </div>
+      )}
+    </div>
   );
 }
 
 // ---- Compact target row (for grid card) ----
 function NetTargetRow({ t }: { t: NetDest }) {
-  const [hovered, setHovered] = React.useState(false);
   const avgLat = React.useMemo(() => {
     const up = t.buckets.filter(b => b.hasData && b.up && b.latencyMs > 0);
     return up.length ? Math.round(up.reduce((s, b) => s + b.latencyMs, 0) / up.length) : 0;
   }, [t.buckets]);
-  const samplingTime = formatSamplingTime(t.probedAt);
 
   const Stat = ({ label, value, color }: { label: string; value: string; color?: string }) => (
     <div>
@@ -159,7 +182,6 @@ function NetTargetRow({ t }: { t: NetDest }) {
 
   return (
     <div style={{
-      position: 'relative', zIndex: hovered ? 2 : 1,
       background: 'rgba(255,255,255,.03)',
       border: '1px solid rgba(255,255,255,.06)',
       borderRadius: 7,
@@ -167,23 +189,7 @@ function NetTargetRow({ t }: { t: NetDest }) {
       display: 'flex',
       flexDirection: 'column',
       gap: 4,
-    }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-      {samplingTime && (
-        <div style={{
-          position: 'absolute', left: '50%', bottom: 'calc(100% + 7px)', transform: 'translateX(-50%)',
-          opacity: hovered ? 1 : 0, visibility: hovered ? 'visible' : 'hidden', transition: 'opacity .14s, visibility .14s',
-          pointerEvents: 'none', whiteSpace: 'nowrap', zIndex: 3,
-          background: '#252d3b', border: '1px solid rgba(255,255,255,.15)', borderRadius: 6,
-          padding: '6px 9px', color: '#e6edf3', fontSize: 11, lineHeight: 1,
-          fontFamily: '"JetBrains Mono",monospace', boxShadow: '0 8px 18px rgba(0,0,0,.35)',
-        }}>
-          {samplingTime}
-          <span style={{
-            position: 'absolute', top: '100%', left: '50%', marginLeft: -5,
-            border: '5px solid transparent', borderTopColor: '#252d3b',
-          }} />
-        </div>
-      )}
+    }}>
       {/* grid: [名称区 flex] [延迟 54px] [均值 54px] [可用率 50px] */}
       <div style={{
         display: 'grid',

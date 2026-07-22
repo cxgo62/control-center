@@ -40,6 +40,8 @@ export interface NetBucket {
   up: boolean;
   latencyMs: number;
   hasData: boolean;
+  startAt: number;
+  endAt: number;
 }
 
 export interface NetDest {
