@@ -52,13 +52,29 @@ Add two launchd-managed services to Control Center and include them in the exist
 
 Extend `ServiceConfig` with an optional structured health assertion. It contains an HTTP status expectation, a recursively nested partial JSON expectation, and an optional timeout. Expected leaf values are compared with strict equality; object keys not listed in the expectation are ignored. A missing expected key, invalid JSON body, wrong HTTP status, wrong value, timeout, or connection error fails the health assertion.
 
+The configuration shape is explicit and nested rather than dot-path based. For example, the backup service declares:
+
+```typescript
+health: {
+  timeoutMs: 5_000,
+  expect: {
+    httpStatus: 200,
+    json: {
+      runtimeRole: 'backup',
+      readOnly: true,
+      codex: { provider: 'local', status: 'available' },
+    },
+  },
+}
+```
+
 The feature is opt-in. Existing service configurations without a structured assertion retain their current monitoring semantics.
 
 For a launchd-managed service with a structured health assertion, status is derived as follows:
 
 1. If the launchd job is absent or not running, report `stopped`.
 2. If the launchd job is running and all health assertions pass, report `running` and record request latency.
-3. If the launchd job is running but the health request or any assertion fails, report `error` and record the completed probe.
+3. If the launchd job is running but the health request or any assertion fails, report `error` and record the completed probe. Persist the request's measured elapsed milliseconds when available, including for timeout, connection, HTTP-status, JSON-parse, and assertion failures; use zero/null only when no request timing exists.
 
 Both new services automatically participate in the existing 30-second polling loop, persisted checks, 24-hour status bars, overview counts, and “探测全部服务” operation because they are entries in `SERVICES`.
 
