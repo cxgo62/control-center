@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import { SERVICES, type ServiceConfig } from './config.js';
 import { insertServiceCheck } from './db.js';
 import { resolveIp } from './utils.js';
+import { checkLaunchAgent, manageLaunchAgent } from './launchd.js';
 
 const execAsync = promisify(exec);
 const IS_LINUX = process.platform === 'linux';
@@ -77,31 +78,6 @@ async function systemdLogs(unit: string, lines: number): Promise<LogLine[]> {
   } catch {
     return [];
   }
-}
-
-// ---- macOS: launchctl (LaunchAgent / LaunchDaemon) ----
-
-async function launchctlCheck(label: string): Promise<{ status: 'running' | 'stopped' | 'error' } | null> {
-  try {
-    const { stdout } = await execAsync(`launchctl list ${label}`, { timeout: 3000 });
-    // Output contains "PID" = <number> if running, or no PID if stopped
-    if (/\"PID\"\s*=\s*\d+/.test(stdout)) return { status: 'running' };
-    return { status: 'stopped' };
-  } catch {
-    // Non-zero exit means label not found
-    return null;
-  }
-}
-
-async function launchctlManage(label: string, plistPath: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
-  const uid = process.getuid?.() ?? 501;
-  const domain = `gui/${uid}`;
-  if (action === 'stop' || action === 'restart') {
-    await execAsync(`launchctl bootout ${domain} ${plistPath}`, { timeout: 10000 }).catch(() => {});
-    if (action === 'stop') return;
-    await new Promise(r => setTimeout(r, 800));
-  }
-  await execAsync(`launchctl bootstrap ${domain} ${plistPath}`, { timeout: 10000 });
 }
 
 function launchAgentPlistPath(label: string): string {
@@ -186,8 +162,9 @@ export async function checkService(svc: ServiceConfig): Promise<ServiceStatus> {
     // If the label is absent from launchctl (null), the service is definitively
     // stopped — do NOT fall back to HTTP, which may still see the port open
     // while the process is mid-shutdown and incorrectly return 'error'.
-    const lc = await launchctlCheck(svc.launchAgent);
-    status = lc ? lc.status : 'stopped';
+    const uid = process.getuid?.() ?? 501;
+    const lc = await checkLaunchAgent({ label: svc.launchAgent, uid, exec: execAsync });
+    status = lc ?? 'stopped';
     if (status === 'running') {
       const http = await httpProbe(checkUrl);
       if (http.status === 'running') latencyMs = http.latencyMs;
@@ -237,7 +214,13 @@ export async function manageService(svc: ServiceConfig, action: 'start' | 'stop'
     return systemdManage(svc.systemd, action);
   }
   if (IS_MACOS && svc.launchAgent) {
-    return launchctlManage(svc.launchAgent, launchAgentPlistPath(svc.launchAgent), action);
+    return manageLaunchAgent({
+      label: svc.launchAgent,
+      plistPath: launchAgentPlistPath(svc.launchAgent),
+      action,
+      uid: process.getuid?.() ?? 501,
+      exec: execAsync,
+    });
   }
   if (IS_MACOS && svc.brewService) {
     return brewManage(svc.brewService, action);
