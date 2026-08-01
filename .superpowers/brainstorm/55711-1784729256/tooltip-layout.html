@@ -1,0 +1,27 @@
+<h2>网络条目的时间气泡</h2>
+<p class="subtitle">Hover 到任意监测条目时，在条目上方显示其当前数据的采样时间。</p>
+
+<div class="cards">
+  <div class="card" data-choice="top" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0b0e14;padding:28px 20px;color:#e6edf3;font-family:system-ui,sans-serif;min-height:180px;position:relative;overflow:visible">
+      <div style="font-size:11px;letter-spacing:.08em;color:#7d8796;margin-bottom:10px">国内连通性</div>
+      <div style="position:relative;background:#171d27;border:1px solid #3194f7;border-radius:7px;padding:10px 12px;box-shadow:0 0 0 1px rgba(49,148,247,.22)">
+        <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700"><span style="width:7px;height:7px;border-radius:50%;background:#3fb950"></span>Baidu <span style="font-weight:400;color:#697586;font-family:monospace;font-size:11px">baidu.com</span></div>
+        <div style="margin-top:8px;height:3px;border-radius:2px;background:linear-gradient(90deg,#3fb950 54%,#f85149 54%)"></div>
+        <div style="position:absolute;left:50%;bottom:calc(100% + 10px);transform:translateX(-50%);white-space:nowrap;background:#252d3b;border:1px solid rgba(255,255,255,.15);border-radius:6px;padding:7px 10px;font:12px ui-monospace,monospace;color:#e6edf3;box-shadow:0 8px 18px rgba(0,0,0,.35)">采样时间 · 今天 22:06:40<div style="position:absolute;top:100%;left:50%;margin-left:-5px;border:5px solid transparent;border-top-color:#252d3b"></div></div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A · 上方居中（推荐）</h3><p>贴近鼠标目标，不遮挡延迟数值；窄卡片也能完整容纳时间。</p></div>
+  </div>
+  <div class="card" data-choice="cursor" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0b0e14;padding:28px 20px;color:#e6edf3;font-family:system-ui,sans-serif;min-height:180px;position:relative;overflow:visible">
+      <div style="font-size:11px;letter-spacing:.08em;color:#7d8796;margin-bottom:10px">国内连通性</div>
+      <div style="position:relative;background:#171d27;border:1px solid #3194f7;border-radius:7px;padding:10px 12px">
+        <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700"><span style="width:7px;height:7px;border-radius:50%;background:#3fb950"></span>Baidu <span style="font-weight:400;color:#697586;font-family:monospace;font-size:11px">baidu.com</span></div>
+        <div style="margin-top:8px;height:3px;border-radius:2px;background:linear-gradient(90deg,#3fb950 54%,#f85149 54%)"></div>
+        <div style="position:absolute;right:-30px;top:25px;white-space:nowrap;background:#252d3b;border:1px solid rgba(255,255,255,.15);border-radius:6px;padding:7px 10px;font:12px ui-monospace,monospace;color:#e6edf3;box-shadow:0 8px 18px rgba(0,0,0,.35)">今天 22:06:40</div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B · 跟随光标</h3><p>强化“当前悬停”感，但可能遮挡邻近条目或落在卡片边界外。</p></div>
+  </div>
+</div>
