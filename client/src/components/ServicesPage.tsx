@@ -7,6 +7,11 @@ import {
   useToast, fmtUptime, fmtAgo,
   type LogEntry,
 } from './Shared.js';
+import {
+  SERVICE_CARD_HEIGHT,
+  SERVICE_CARD_HEADER_HEIGHT,
+  SERVICE_CARD_METRICS_HEIGHT,
+} from './service-card-layout.js';
 
 // Group definitions (local since we can't import from config)
 const CC_GROUPS: Record<string, { key: string; label: string; desc: string }> = {
@@ -42,6 +47,7 @@ function C_Card({ svc, onAction, onLogs, onToast }: CCardProps) {
         background: 'linear-gradient(180deg,#141a23,#11161e)',
         border: `1px solid ${hover ? 'rgba(255,255,255,.14)' : 'rgba(255,255,255,.07)'}`,
         borderRadius: 15, padding: '16px 17px 15px',
+        height: SERVICE_CARD_HEIGHT, boxSizing: 'border-box',
         display: 'flex', flexDirection: 'column', gap: 12,
         position: 'relative', overflow: 'hidden',
         transition: 'border-color .15s, transform .15s, box-shadow .15s',
@@ -57,17 +63,28 @@ function C_Card({ svc, onAction, onLogs, onToast }: CCardProps) {
       }} />
 
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, position: 'relative' }}>
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', gap: 10, position: 'relative',
+        height: SERVICE_CARD_HEADER_HEIGHT, minHeight: SERVICE_CARD_HEADER_HEIGHT,
+        flex: `0 0 ${SERVICE_CARD_HEADER_HEIGHT}px`,
+      }}>
         <StatusDot status={svc.status} size={10} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15.5, fontWeight: 700, color: '#e9eef4', lineHeight: 1.15 }}>{svc.name}</div>
-          <div style={{ fontSize: 11, color: '#6b7482', marginTop: 3, fontFamily: '"JetBrains Mono",monospace' }}>{svc.tech}</div>
+          <div style={{
+            fontSize: 15.5, fontWeight: 700, color: '#e9eef4', lineHeight: 1.15,
+            display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2,
+            overflow: 'hidden',
+          }}>{svc.name}</div>
+          <div style={{
+            fontSize: 11, color: '#6b7482', marginTop: 3, fontFamily: '"JetBrains Mono",monospace',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>{svc.tech}</div>
         </div>
         <StatusPill status={svc.status} />
       </div>
 
       {/* Past 24h status bar */}
-      <div style={{ padding: '4px 0 2px' }}>
+      <div style={{ padding: '4px 0 2px', height: 72, boxSizing: 'border-box', flex: '0 0 72px' }}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 7 }}>
           <span style={{ fontSize: 9.5, letterSpacing: '.12em', textTransform: 'uppercase', color: '#525a66', fontWeight: 700 }}>
             过去 24 小时
@@ -88,6 +105,8 @@ function C_Card({ svc, onAction, onLogs, onToast }: CCardProps) {
       {/* Metrics row */}
       <div style={{
         display: 'flex', gap: 16, padding: '11px 0',
+        height: SERVICE_CARD_METRICS_HEIGHT, boxSizing: 'border-box',
+        flex: `0 0 ${SERVICE_CARD_METRICS_HEIGHT}px`, overflow: 'hidden',
         borderTop: '1px solid rgba(255,255,255,.05)',
         fontFamily: '"JetBrains Mono",monospace',
       }}>
@@ -97,15 +116,17 @@ function C_Card({ svc, onAction, onLogs, onToast }: CCardProps) {
         </div>
         <div style={{ flex: 0.7 }}>
           <div style={{ fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: '#525a66', fontWeight: 700, marginBottom: 3 }}>端口</div>
-          <div style={{ fontSize: 12, color: '#9aa5b3' }}>{svc.port}</div>
+          <div style={{ fontSize: 12, color: '#9aa5b3', display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' }}>{svc.port}</div>
         </div>
         <div style={{ flex: 1.4, minWidth: 0 }}>
           <div style={{ fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: '#525a66', fontWeight: 700, marginBottom: 3 }}>地址</div>
-          <div style={{ fontSize: 12, color: '#9aa5b3', wordBreak: 'break-all' }}>{svc.addr}</div>
+          <div style={{ fontSize: 12, color: '#9aa5b3', wordBreak: 'break-all', display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' }}>{svc.addr}</div>
         </div>
       </div>
 
-      <ServiceActions svc={svc} onAction={onAction} onLogs={onLogs} onToast={onToast} compact max={5} />
+      <div style={{ marginTop: 'auto', minHeight: 26, flex: '0 0 auto' }}>
+        <ServiceActions svc={svc} onAction={onAction} onLogs={onLogs} onToast={onToast} compact max={5} />
+      </div>
     </div>
   );
 }
@@ -130,7 +151,10 @@ function C_Section({ group, items, onAction, onLogs, onToast }: CSectionProps) {
           letterSpacing: '.08em', textTransform: 'uppercase',
         }}>{g.desc}</span>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 14 }}>
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))',
+        gridAutoRows: SERVICE_CARD_HEIGHT, alignItems: 'stretch', gap: 14,
+      }}>
         {items.map(s => (
           <C_Card key={s.id} svc={s} onAction={onAction} onLogs={onLogs} onToast={onToast} />
         ))}

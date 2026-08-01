@@ -1,0 +1,3 @@
+export const SERVICE_CARD_HEIGHT = 280;
+export const SERVICE_CARD_HEADER_HEIGHT = 54;
+export const SERVICE_CARD_METRICS_HEIGHT = 50;
