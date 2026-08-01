@@ -32,11 +32,27 @@
   // 服务管理方式（按平台自动选择，至少填一种）：
   brewService: 'budget',    // macOS：brew services 管理的服务名
   systemd: 'budget',        // Linux：systemd unit 名
+  launchAgent: 'top.example.budget', // macOS：LaunchAgent label
   startScript: 'cd /opt/budget && npm start',  // 通用：启动命令
   stopScript: 'pkill -f "node /opt/budget"',   // 通用：停止命令
   logFile: '/opt/budget/logs/app.log',         // 日志文件路径（可选）
+
+  // 可选：严格校验健康接口的 HTTP 状态和嵌套 JSON 字段
+  health: {
+    timeoutMs: 5000,
+    expect: {
+      httpStatus: 200,
+      json: {
+        runtimeRole: 'backup',
+        readOnly: true,
+        codex: { provider: 'local', status: 'available' },
+      },
+    },
+  },
 }
 ```
+
+配置了 `health` 的服务只有在进程管理器状态正常、HTTP 状态码匹配且所有列出的 JSON 字段递归匹配时才显示为“运行中”。接口超时、连接失败、非预期状态码、无效 JSON 或字段不匹配都会显示为“异常”；未配置 `health` 的旧服务保持原有进程管理器语义。JSON 断言只校验配置中列出的字段，响应可以包含额外字段。
 
 **服务管理优先级**（代码自动判断，无需手动配置）：
 
@@ -96,6 +112,8 @@ PROXY_URL=http://127.0.0.1:7890 ./start.sh
 - **探测** — 立即触发一次健康检查，刷新状态
 - **日志** — 读取日志文件或 journald，在右侧抽屉展示
 - **打开** — 在新标签跳转到 `url` 字段配置的地址
+
+macOS LaunchAgent 的状态通过 `launchctl print gui/<uid>/<label>` 查询；重启使用 `launchctl kickstart -k gui/<uid>/<label>`，启动和停止分别使用对应 plist 的 `launchctl bootstrap` 与 `launchctl bootout`。
 
 > **macOS 权限说明**：`brew services` 管理用户级服务无需 sudo。若需管理系统级服务（监听 80/443 端口的 nginx），在安装时执行过 `sudo brew services start nginx` 的话，重启也需要 sudo 权限。可在 `/etc/sudoers.d/control-center` 中为当前用户开放指定命令的无密码 sudo：
 > ```
