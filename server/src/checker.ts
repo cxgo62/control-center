@@ -1,10 +1,11 @@
-import { fetch } from 'undici';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { SERVICES, type ServiceConfig } from './config.js';
 import { insertServiceCheck } from './db.js';
 import { resolveIp } from './utils.js';
 import { checkLaunchAgent, manageLaunchAgent } from './launchd.js';
+import { probeHttpHealth } from './health-check.js';
+import { checkManagedLaunchAgent } from './managed-service-check.js';
 
 const execAsync = promisify(exec);
 const IS_LINUX = process.platform === 'linux';
@@ -21,20 +22,6 @@ export interface ServiceStatus {
 export interface LogLine {
   level: 'info' | 'warn' | 'error';
   text: string;
-}
-
-async function httpProbe(url: string): Promise<{ status: 'running' | 'stopped' | 'error'; latencyMs: number }> {
-  const start = Date.now();
-  try {
-    await fetch(url, { signal: AbortSignal.timeout(5000) });
-    return { status: 'running', latencyMs: Date.now() - start };
-  } catch (err: unknown) {
-    const latencyMs = Date.now() - start;
-    if (err instanceof Error && err.message.includes('ECONNREFUSED')) {
-      return { status: 'stopped', latencyMs };
-    }
-    return { status: 'error', latencyMs };
-  }
 }
 
 // ---- Linux: systemd ----
@@ -154,38 +141,35 @@ export async function checkService(svc: ServiceConfig): Promise<ServiceStatus> {
     const sd = await systemdCheck(svc.systemd);
     if (sd) { status = sd.status; startedAt = sd.startedAt; }
     if (status === 'running') {
-      const http = await httpProbe(checkUrl);
+      const http = await probeHttpHealth(checkUrl, svc.health);
       latencyMs = http.latencyMs;
     }
   } else if (IS_MACOS && svc.launchAgent) {
-    // macOS LaunchAgent: launchctl is the sole authority for status.
-    // If the label is absent from launchctl (null), the service is definitively
-    // stopped — do NOT fall back to HTTP, which may still see the port open
-    // while the process is mid-shutdown and incorrectly return 'error'.
     const uid = process.getuid?.() ?? 501;
-    const lc = await checkLaunchAgent({ label: svc.launchAgent, uid, exec: execAsync });
-    status = lc ?? 'stopped';
-    if (status === 'running') {
-      const http = await httpProbe(checkUrl);
-      if (http.status === 'running') latencyMs = http.latencyMs;
-    }
+    const managed = await checkManagedLaunchAgent(svc, {
+      checkProcess: () => checkLaunchAgent({ label: svc.launchAgent!, uid, exec: execAsync }),
+      probeHealth: () => probeHttpHealth(checkUrl, svc.health),
+      persist: insertServiceCheck,
+      now: Date.now,
+    });
+    return managed;
   } else if (IS_MACOS && svc.brewService) {
     // macOS brew services: authoritative for status
     const br = await brewCheck(svc.brewService);
     if (br) {
       status = br.status;
     } else {
-      const http = await httpProbe(checkUrl);
+      const http = await probeHttpHealth(checkUrl, svc.health);
       status = http.status;
       latencyMs = http.latencyMs;
     }
     if (status === 'running') {
-      const http = await httpProbe(checkUrl);
+      const http = await probeHttpHealth(checkUrl, svc.health);
       if (http.status === 'running') latencyMs = http.latencyMs;
     }
   } else {
     // No process manager configured: HTTP only
-    const http = await httpProbe(checkUrl);
+    const http = await probeHttpHealth(checkUrl, svc.health);
     status = http.status;
     latencyMs = http.latencyMs;
   }
