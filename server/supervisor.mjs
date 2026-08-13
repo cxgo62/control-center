@@ -82,13 +82,10 @@ export async function superviseChildren(specs, options = {}) {
   return result;
 }
 
-const isEntrypoint = process.argv[1]
-  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+export function createSupervisorSpecs(rootDir, environment = process.env) {
+  const serverDir = path.join(rootDir, 'server');
 
-if (isEntrypoint) {
-  const serverDir = path.dirname(fileURLToPath(import.meta.url));
-  const rootDir = path.dirname(serverDir);
-  const result = await superviseChildren([
+  return [
     {
       name: 'server',
       command: path.join(serverDir, 'node_modules/.bin/tsx'),
@@ -99,8 +96,21 @@ if (isEntrypoint) {
       name: 'client',
       command: path.join(rootDir, 'client/node_modules/.bin/vite'),
       cwd: path.join(rootDir, 'client'),
+      env: {
+        ...environment,
+        CONTROL_CENTER_PUBLIC_BASE_PATH: '/control-center/',
+      },
     },
-  ]);
+  ];
+}
+
+const isEntrypoint = process.argv[1]
+  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isEntrypoint) {
+  const serverDir = path.dirname(fileURLToPath(import.meta.url));
+  const rootDir = path.dirname(serverDir);
+  const result = await superviseChildren(createSupervisorSpecs(rootDir));
 
   process.exitCode = result.code && result.code !== 0 ? result.code : 1;
 }

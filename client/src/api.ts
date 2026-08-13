@@ -1,4 +1,5 @@
 import type { NetworkData, NetworkRange, VpsLineResponse } from './types.js';
+import { apiPath } from './control-center-paths.js';
 
 export type ClashStatus =
   | {
@@ -51,10 +52,10 @@ export type KiwiVmTrafficResponse =
     };
 
 export const api = {
-  getServices: () => fetch('/api/services').then(r => r.json()),
-  getEvents: () => fetch('/api/events').then(r => r.json()),
+  getServices: () => fetch(apiPath('/services', import.meta.env.BASE_URL)).then(r => r.json()),
+  getEvents: () => fetch(apiPath('/events', import.meta.env.BASE_URL)).then(r => r.json()),
   serviceAction: (id: string, action: string) =>
-    fetch(`/api/services/${id}/action`, {
+    fetch(apiPath(`/services/${id}/action`, import.meta.env.BASE_URL), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action }),
@@ -62,28 +63,28 @@ export const api = {
   getServiceLogs: (id: string, file?: string) => {
     const q = new URLSearchParams({ lines: '40' });
     if (file) q.set('file', file);
-    return fetch(`/api/services/${id}/logs?${q}`).then(r => r.json());
+    return fetch(`${apiPath(`/services/${id}/logs`, import.meta.env.BASE_URL)}?${q}`).then(r => r.json());
   },
   getNetworkData: (range: string) =>
-    fetch(`/api/network/data?range=${encodeURIComponent(range)}`).then(r => r.json()) as Promise<NetworkData>,
+    fetch(`${apiPath('/network/data', import.meta.env.BASE_URL)}?range=${encodeURIComponent(range)}`).then(r => r.json()) as Promise<NetworkData>,
   getVpsLine: (range: NetworkRange) => {
     const query = new URLSearchParams({ range });
-    return fetch(`/api/network/vps-line?${query}`).then(r => r.json()) as Promise<VpsLineResponse>;
+    return fetch(`${apiPath('/network/vps-line', import.meta.env.BASE_URL)}?${query}`).then(r => r.json()) as Promise<VpsLineResponse>;
   },
   probeNetwork: () =>
-    fetch('/api/network/probe', { method: 'POST' }).then(r => r.json()),
+    fetch(apiPath('/network/probe', import.meta.env.BASE_URL), { method: 'POST' }).then(r => r.json()),
   pingNetwork: () =>
-    fetch('/api/network/ping').then(r => r.json()) as Promise<Record<string, Record<string, { up: boolean; latencyMs: number; probedAt: number }>>>,
+    fetch(apiPath('/network/ping', import.meta.env.BASE_URL)).then(r => r.json()) as Promise<Record<string, Record<string, { up: boolean; latencyMs: number; probedAt: number }>>>,
   getNetworkProxy: () =>
-    fetch('/api/network/proxy').then(r => r.json()),
+    fetch(apiPath('/network/proxy', import.meta.env.BASE_URL)).then(r => r.json()),
   setNetworkProxy: (proxyUrl: string) =>
-    fetch('/api/network/proxy', {
+    fetch(apiPath('/network/proxy', import.meta.env.BASE_URL), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ proxyUrl }),
     }).then(r => r.json()),
   getClashStatus: () =>
-    fetch('/api/network/clash').then(r => r.json()) as Promise<ClashStatus>,
+    fetch(apiPath('/network/clash', import.meta.env.BASE_URL)).then(r => r.json()) as Promise<ClashStatus>,
   getKiwiVmTraffic: () =>
-    fetch('/api/network/kiwivm-traffic').then(r => r.json()) as Promise<KiwiVmTrafficResponse>,
+    fetch(apiPath('/network/kiwivm-traffic', import.meta.env.BASE_URL)).then(r => r.json()) as Promise<KiwiVmTrafficResponse>,
 };

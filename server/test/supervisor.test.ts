@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { superviseChildren } from '../supervisor.mjs';
+import { createSupervisorSpecs, superviseChildren } from '../supervisor.mjs';
+
+test('starts the launchd Vite child with the control-center public base', () => {
+  const specs = createSupervisorSpecs('/tmp/control-center', { EXISTING: 'preserved' });
+  const client = specs.find(spec => spec.name === 'client');
+
+  assert.ok(client);
+  assert.equal(client.env.EXISTING, 'preserved');
+  assert.equal(client.env.CONTROL_CENTER_PUBLIC_BASE_PATH, '/control-center/');
+});
 
 test('stops the surviving child when either managed process exits', async () => {
   const spawned: Array<{ name: string; pid: number }> = [];
