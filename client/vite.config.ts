@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import { stripBasePath } from './src/control-center-paths.js';
 
 const apiTarget = 'http://localhost:9000';
+const allowedHosts = ['damkeeper.top', 'www.damkeeper.top', 'localhost'];
 
 export function createViteConfig(publicBasePath = '/') {
   const proxy = publicBasePath === '/'
@@ -18,7 +19,7 @@ export function createViteConfig(publicBasePath = '/') {
   return defineConfig({
     base: publicBasePath,
     plugins: [react()],
-    server: { proxy },
+    server: { allowedHosts, proxy },
     build: { outDir: 'dist' },
   });
 }

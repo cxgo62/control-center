@@ -35,4 +35,9 @@ test('configures Vite for root mode and the launchd public base', () => {
   assert.equal(publicConfig.base, CONTROL_CENTER_BASE_PATH);
   assert.ok(publicConfig.server?.proxy?.['/control-center/api']);
   assert.ok(publicConfig.server?.proxy?.['/api']);
+  assert.deepEqual(publicConfig.server?.allowedHosts, [
+    'damkeeper.top',
+    'www.damkeeper.top',
+    'localhost',
+  ]);
 });
