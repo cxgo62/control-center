@@ -12,6 +12,8 @@ type TimerHandle = {
   kind: 'interval' | 'timeout';
 };
 
+type WatchListener = (eventType: string, filename: string | Buffer | null) => void;
+
 class FakeScheduler {
   handles: TimerHandle[] = [];
 
@@ -176,7 +178,7 @@ test('startup discovers once, probes cached endpoint every 60 seconds, and falls
 
   await monitor.start();
   assert.equal(reads, 1);
-  assert.equal(watchPath, '/private/clash-verge.yaml');
+  assert.equal(watchPath, '/private');
   assert.deepEqual(monitor.getDiscoveryState(), { status: 'resolved', nodeName: 'Private VPS' });
   assert.equal(JSON.stringify(monitor.getDiscoveryState()).includes('endpoint-1'), false);
 
@@ -195,18 +197,45 @@ test('startup discovers once, probes cached endpoint every 60 seconds, and falls
   assert.equal(endpoints[1].host, 'endpoint-2.example.com');
 });
 
-test('file watch events debounce for two seconds and only trigger a fresh read', async () => {
+test('starts the parent-directory watcher even when the config file is absent', async () => {
   const scheduler = new FakeScheduler();
-  let watchListener: (() => void) | undefined;
+  let watchPath = '';
+  const monitor = monitorFactory()({
+    configuredNodeName: 'Private VPS',
+    configPath: '/private/clash-verge.yaml',
+    readConfig: async () => { throw new Error('ENOENT /private/clash-verge.yaml'); },
+    watchConfig: (directoryPath: string) => {
+      watchPath = directoryPath;
+      return { close() {} };
+    },
+    runProbe: async () => successfulSample(),
+    insertSample: () => {},
+    logger: createLogger([]),
+    ...scheduler,
+  });
+
+  await monitor.start();
+
+  assert.equal(watchPath, '/private');
+  assert.deepEqual(monitor.getDiscoveryState(), {
+    status: 'unresolved',
+    nodeName: 'Private VPS',
+    code: 'CLASH_CONFIG_UNAVAILABLE',
+  });
+});
+
+test('directory watcher ignores events for unrelated files', async () => {
+  const scheduler = new FakeScheduler();
+  let watchListener: WatchListener | undefined;
   let reads = 0;
   const monitor = monitorFactory()({
     configuredNodeName: 'Private VPS',
     configPath: '/private/clash-verge.yaml',
     readConfig: async () => {
       reads += 1;
-      return `proxies:\n  - name: Private VPS\n    server: endpoint-${reads}.example.com\n    port: 443\n`;
+      return 'proxies:\n  - name: Private VPS\n    server: safe.example.com\n    port: 443\n';
     },
-    watchConfig: (_filePath: string, listener: () => void) => {
+    watchConfig: (_directoryPath: string, listener: WatchListener) => {
       watchListener = listener;
       return { close() {} };
     },
@@ -217,9 +246,37 @@ test('file watch events debounce for two seconds and only trigger a fresh read',
   });
 
   await monitor.start();
-  watchListener?.();
-  watchListener?.();
-  watchListener?.();
+  watchListener?.('change', 'unrelated.yaml');
+
+  assert.equal(reads, 1);
+  assert.equal(scheduler.handles.some(handle => handle.active && handle.kind === 'timeout'), false);
+});
+
+test('repeated config replacement events debounce for two seconds and trigger one fresh read', async () => {
+  const scheduler = new FakeScheduler();
+  let watchListener: WatchListener | undefined;
+  let reads = 0;
+  const monitor = monitorFactory()({
+    configuredNodeName: 'Private VPS',
+    configPath: '/private/clash-verge.yaml',
+    readConfig: async () => {
+      reads += 1;
+      return `proxies:\n  - name: Private VPS\n    server: endpoint-${reads}.example.com\n    port: 443\n`;
+    },
+    watchConfig: (_directoryPath: string, listener: WatchListener) => {
+      watchListener = listener;
+      return { close() {} };
+    },
+    runProbe: async () => successfulSample(),
+    insertSample: () => {},
+    logger: createLogger([]),
+    ...scheduler,
+  });
+
+  await monitor.start();
+  watchListener?.('rename', 'clash-verge.yaml');
+  watchListener?.('change', 'clash-verge.yaml');
+  watchListener?.('rename', Buffer.from('clash-verge.yaml'));
   assert.equal(reads, 1);
   assert.equal(scheduler.handles.filter(handle => handle.active && handle.kind === 'timeout').length, 1);
 
@@ -232,7 +289,7 @@ test('queues one latest follow-up discovery when triggers arrive during an activ
   const scheduler = new FakeScheduler();
   const logs: LogEntry[] = [];
   const endpoints: PrivateNodeEndpoint[] = [];
-  let watchListener: (() => void) | undefined;
+  let watchListener: WatchListener | undefined;
   let resolveFallback: ((content: string) => void) | undefined;
   let reads = 0;
   const monitor = monitorFactory()({
@@ -248,7 +305,7 @@ test('queues one latest follow-up discovery when triggers arrive during an activ
       }
       return 'proxies:\n  - name: Private VPS\n    server: follow-up.example.com\n    port: 8443\n';
     },
-    watchConfig: (_filePath: string, listener: () => void) => {
+    watchConfig: (_directoryPath: string, listener: WatchListener) => {
       watchListener = listener;
       return { close() {} };
     },
@@ -267,7 +324,7 @@ test('queues one latest follow-up discovery when triggers arrive during an activ
   assert.equal(reads, 2);
 
   scheduler.fireInterval(30 * 60_000);
-  watchListener?.();
+  watchListener?.('rename', 'clash-verge.yaml');
   scheduler.fireLatestTimeout(2_000);
   assert.equal(reads, 2, 'triggers must not overlap the active discovery');
 
@@ -286,7 +343,7 @@ test('queues one latest follow-up discovery when triggers arrive during an activ
 
 test('stop prevents a queued discovery follow-up from running', async () => {
   const scheduler = new FakeScheduler();
-  let watchListener: (() => void) | undefined;
+  let watchListener: WatchListener | undefined;
   let resolveFallback: ((content: string) => void) | undefined;
   let reads = 0;
   const monitor = monitorFactory()({
@@ -299,7 +356,7 @@ test('stop prevents a queued discovery follow-up from running', async () => {
       }
       return new Promise<string>(resolve => { resolveFallback = resolve; });
     },
-    watchConfig: (_filePath: string, listener: () => void) => {
+    watchConfig: (_directoryPath: string, listener: WatchListener) => {
       watchListener = listener;
       return { close() {} };
     },
@@ -312,7 +369,7 @@ test('stop prevents a queued discovery follow-up from running', async () => {
   await monitor.start();
   scheduler.fireInterval(30 * 60_000);
   await settle();
-  watchListener?.();
+  watchListener?.('change', 'clash-verge.yaml');
   scheduler.fireLatestTimeout(2_000);
   monitor.stop();
   resolveFallback?.('proxies:\n  - name: Private VPS\n    server: stopped.example.com\n    port: 443\n');
@@ -561,6 +618,103 @@ test('three failed rounds trigger early rediscovery with cooldown and useful rec
   assert.equal(logs.some(entry => entry.context.code === 'VPS_LINE_PROBE_RECOVERED'), true);
 });
 
+test('repeated persistence failures log sanitized errors without triggering rediscovery', async () => {
+  const scheduler = new FakeScheduler();
+  const logs: LogEntry[] = [];
+  let reads = 0;
+  const monitor = monitorFactory()({
+    configuredNodeName: 'Private VPS',
+    configPath: '/private/clash-verge.yaml',
+    readConfig: async () => {
+      reads += 1;
+      return 'proxies:\n  - name: Private VPS\n    server: secret-endpoint.example.com\n    port: 65432\n';
+    },
+    watchConfig: () => ({ close() {} }),
+    runProbe: async () => successfulSample(),
+    insertSample: () => {
+      throw new Error('SQLITE_BUSY /private/data.db secret-endpoint.example.com:65432');
+    },
+    logger: createLogger(logs),
+    ...scheduler,
+  });
+
+  await monitor.start();
+  await monitor.probeNow();
+  await monitor.probeNow();
+  await monitor.probeNow();
+
+  assert.equal(reads, 1);
+  assert.deepEqual(logs.filter(entry => entry.context.code === 'VPS_LINE_SAMPLE_PERSIST_FAILED'), [
+    {
+      level: 'error',
+      context: {
+        code: 'VPS_LINE_SAMPLE_PERSIST_FAILED',
+        nodeName: 'Private VPS',
+        category: 'sample_insert',
+      },
+      message: 'VPS line sample persistence failed',
+    },
+    {
+      level: 'error',
+      context: {
+        code: 'VPS_LINE_SAMPLE_PERSIST_FAILED',
+        nodeName: 'Private VPS',
+        category: 'sample_insert',
+      },
+      message: 'VPS line sample persistence failed',
+    },
+    {
+      level: 'error',
+      context: {
+        code: 'VPS_LINE_SAMPLE_PERSIST_FAILED',
+        nodeName: 'Private VPS',
+        category: 'sample_insert',
+      },
+      message: 'VPS line sample persistence failed',
+    },
+  ]);
+  const serialized = JSON.stringify(logs);
+  assert.equal(serialized.includes('SQLITE_BUSY'), false);
+  assert.equal(serialized.includes('/private/data.db'), false);
+  assert.equal(serialized.includes('secret-endpoint'), false);
+  assert.equal(serialized.includes('65432'), false);
+  assert.equal(logs.some(entry => entry.context.code === 'VPS_LINE_PROBE_ERROR'), false);
+  assert.equal(logs.some(entry => entry.context.code === 'VPS_LINE_EARLY_REDISCOVERY'), false);
+});
+
+test('network failure handling still runs when the failed sample cannot be persisted', async () => {
+  const scheduler = new FakeScheduler();
+  const logs: LogEntry[] = [];
+  let reads = 0;
+  const monitor = monitorFactory()({
+    configuredNodeName: 'Private VPS',
+    configPath: '/private/clash-verge.yaml',
+    readConfig: async () => {
+      reads += 1;
+      return 'proxies:\n  - name: Private VPS\n    server: safe.example.com\n    port: 443\n';
+    },
+    watchConfig: () => ({ close() {} }),
+    runProbe: async () => failedSample('both'),
+    insertSample: () => { throw new Error('private database detail'); },
+    logger: createLogger(logs),
+    ...scheduler,
+  });
+
+  await monitor.start();
+  await monitor.probeNow();
+  await monitor.probeNow();
+  await monitor.probeNow();
+
+  assert.equal(reads, 2);
+  assert.equal(logs.filter(entry => entry.context.code === 'VPS_LINE_SAMPLE_PERSIST_FAILED').length, 3);
+  assert.deepEqual(
+    logs.filter(entry => entry.context.code === 'VPS_LINE_PROBE_FAILED')
+      .map(entry => entry.context.consecutiveFailures),
+    [1, 2, 3],
+  );
+  assert.equal(logs.some(entry => entry.context.code === 'VPS_LINE_EARLY_REDISCOVERY'), true);
+});
+
 test('probe rounds never overlap and rejected probes are handled without leaking endpoint details', async () => {
   const scheduler = new FakeScheduler();
   const logs: LogEntry[] = [];
@@ -597,13 +751,13 @@ test('probe rounds never overlap and rejected probes are handled without leaking
 
 test('stop closes the watcher and clears every scheduled monitor timer', async () => {
   const scheduler = new FakeScheduler();
-  let watchListener: (() => void) | undefined;
+  let watchListener: WatchListener | undefined;
   let watcherCloses = 0;
   const monitor = monitorFactory()({
     configuredNodeName: 'Private VPS',
     configPath: '/private/clash-verge.yaml',
     readConfig: async () => 'proxies:\n  - name: Private VPS\n    server: safe.example.com\n    port: 443\n',
-    watchConfig: (_filePath: string, listener: () => void) => {
+    watchConfig: (_directoryPath: string, listener: WatchListener) => {
       watchListener = listener;
       return { close() { watcherCloses += 1; } };
     },
@@ -614,7 +768,7 @@ test('stop closes the watcher and clears every scheduled monitor timer', async (
   });
 
   await monitor.start();
-  watchListener?.();
+  watchListener?.('change', 'clash-verge.yaml');
   await monitor.probeNow();
   await monitor.probeNow();
   await monitor.probeNow();

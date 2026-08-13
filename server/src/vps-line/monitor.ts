@@ -1,4 +1,5 @@
 import { promises as fsPromises, watch as fsWatch } from 'node:fs';
+import { basename, dirname } from 'node:path';
 import { insertVpsLineSample, type VpsLineSampleInput } from '../db.js';
 import {
   resolvePrivateNode,
@@ -40,6 +41,7 @@ type Watcher = {
   on?(event: 'error', listener: (error: unknown) => void): unknown;
   off?(event: 'error', listener: (error: unknown) => void): unknown;
 };
+type WatchEventListener = (eventType: 'rename' | 'change', filename: string | Buffer | null) => void;
 type DiscoveryReason = 'startup' | 'file_change' | 'fallback' | 'probe_failures';
 type ProbeFailureCategory =
   | 'tcp_down'
@@ -52,7 +54,7 @@ export type VpsLineMonitorDependencies = {
   configPath: string;
   logger: VpsLineMonitorLogger;
   readConfig?: (filePath: string) => Promise<string>;
-  watchConfig?: (filePath: string, listener: () => void) => Watcher;
+  watchConfig?: (directoryPath: string, listener: WatchEventListener) => Watcher;
   resolveNode?: typeof resolvePrivateNode;
   runProbe?: (endpoint: PrivateNodeEndpoint) => Promise<VpsLineProbeSample>;
   insertSample?: (sample: VpsLineSampleInput) => void;
@@ -64,8 +66,8 @@ export type VpsLineMonitorDependencies = {
   earlyRediscoveryCooldownMs?: number;
 };
 
-function defaultWatchConfig(filePath: string, listener: () => void): Watcher {
-  return fsWatch(filePath, listener);
+function defaultWatchConfig(directoryPath: string, listener: WatchEventListener): Watcher {
+  return fsWatch(directoryPath, listener);
 }
 
 function failureCategory(sample: VpsLineProbeSample): ProbeFailureCategory | null {
@@ -92,6 +94,8 @@ export function createVpsLineMonitor(dependencies: VpsLineMonitorDependencies): 
   const cancelTimeout = dependencies.clearTimeout ?? (handle => clearTimeout(handle as ReturnType<typeof setTimeout>));
   const earlyRediscoveryCooldownMs = dependencies.earlyRediscoveryCooldownMs
     ?? DEFAULT_EARLY_REDISCOVERY_COOLDOWN_MS;
+  const configDirectoryPath = dirname(dependencies.configPath);
+  const configFileName = basename(dependencies.configPath);
 
   let lifecycle: 'idle' | 'running' | 'stopped' = 'idle';
   let discoveryState: VpsLineDiscoveryState = { status: 'unconfigured' };
@@ -224,31 +228,9 @@ export function createVpsLineMonitor(dependencies: VpsLineMonitorDependencies): 
   };
 
   const executeProbe = async (cachedEndpoint: PrivateNodeEndpoint, generation: number): Promise<void> => {
+    let sample: VpsLineProbeSample;
     try {
-      const sample = await runProbe(cachedEndpoint);
-      if (lifecycle !== 'running') return;
-      if (generation !== endpointGeneration) {
-        logger.info({
-          code: 'VPS_LINE_PROBE_STALE',
-          nodeName: configuredNodeName,
-          category: 'endpoint_superseded',
-        }, 'VPS line probe result discarded');
-        return;
-      }
-      insertSample(sample);
-      const category = failureCategory(sample);
-      if (category) {
-        await recordProbeFailure(category);
-        return;
-      }
-      if (consecutiveFailures > 0) {
-        logger.info({
-          code: 'VPS_LINE_PROBE_RECOVERED',
-          nodeName: configuredNodeName,
-          previousConsecutiveFailures: consecutiveFailures,
-        }, 'VPS line probe recovered');
-      }
-      consecutiveFailures = 0;
+      sample = await runProbe(cachedEndpoint);
     } catch {
       if (lifecycle !== 'running') return;
       if (generation !== endpointGeneration) {
@@ -260,7 +242,42 @@ export function createVpsLineMonitor(dependencies: VpsLineMonitorDependencies): 
         return;
       }
       await recordProbeFailure('probe_execution');
+      return;
     }
+
+    if (lifecycle !== 'running') return;
+    if (generation !== endpointGeneration) {
+      logger.info({
+        code: 'VPS_LINE_PROBE_STALE',
+        nodeName: configuredNodeName,
+        category: 'endpoint_superseded',
+      }, 'VPS line probe result discarded');
+      return;
+    }
+
+    try {
+      insertSample(sample);
+    } catch {
+      logger.error({
+        code: 'VPS_LINE_SAMPLE_PERSIST_FAILED',
+        nodeName: configuredNodeName,
+        category: 'sample_insert',
+      }, 'VPS line sample persistence failed');
+    }
+
+    const category = failureCategory(sample);
+    if (category) {
+      await recordProbeFailure(category);
+      return;
+    }
+    if (consecutiveFailures > 0) {
+      logger.info({
+        code: 'VPS_LINE_PROBE_RECOVERED',
+        nodeName: configuredNodeName,
+        previousConsecutiveFailures: consecutiveFailures,
+      }, 'VPS line probe recovered');
+    }
+    consecutiveFailures = 0;
   };
 
   const probeNow = (): Promise<void> => {
@@ -302,8 +319,10 @@ export function createVpsLineMonitor(dependencies: VpsLineMonitorDependencies): 
     }, 'VPS line monitor started');
 
     try {
-      watcher = watchConfig(dependencies.configPath, () => {
+      watcher = watchConfig(configDirectoryPath, (_eventType, filename) => {
         if (lifecycle !== 'running') return;
+        const changedFileName = Buffer.isBuffer(filename) ? filename.toString('utf8') : filename;
+        if (changedFileName !== configFileName) return;
         if (debounceTimer !== undefined) cancelTimeout(debounceTimer);
         debounceTimer = scheduleTimeout(() => {
           debounceTimer = undefined;
