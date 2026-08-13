@@ -19,6 +19,8 @@ test('validator retains known group and target series while skipping invalid and
     { id: 'bad-target', label: 'Bad target', source: { kind: 'target', targetId: 'missing', path: 'proxy' }, color: '#123456', order: 4 },
     { id: 'bad-path', label: 'Bad path', source: { kind: 'target', targetId: 'google', path: 'tunnel' }, color: '#123456', order: 5 },
     { id: 'bad-color', label: 'Bad color', source: { kind: 'target', targetId: 'google', path: 'proxy' }, color: '', order: 6 },
+    { id: 'five-digit-color', label: 'Five', source: { kind: 'target', targetId: 'google', path: 'proxy' }, color: '#12345', order: 7 },
+    { id: 'seven-digit-color', label: 'Seven', source: { kind: 'target', targetId: 'google', path: 'proxy' }, color: '#1234567', order: 8 },
   ]);
 
   assert.deepEqual(result.series, [
@@ -30,5 +32,7 @@ test('validator retains known group and target series while skipping invalid and
     { id: 'bad-target', reason: 'unknown-target' },
     { id: 'bad-path', reason: 'invalid-path' },
     { id: 'bad-color', reason: 'invalid-color' },
+    { id: 'five-digit-color', reason: 'invalid-color' },
+    { id: 'seven-digit-color', reason: 'invalid-color' },
   ]);
 });
