@@ -6,26 +6,7 @@ import { NET_TARGETS } from '../config.js';
 import { getNetProbes, getGroupStats, getSetting, setSetting, type NetProbe } from '../db.js';
 import { probeAll, probeTarget, getActiveProxyUrl } from '../prober.js';
 import { createLivePingEntry, latestProbedAt, latestProbeForTarget } from './network-utils.js';
-
-function parseFlClashConfig(content: string) {
-  const mixedPortMatch = content.match(/^mixed-port:\s*(\d+)/m);
-  const mixedPort = mixedPortMatch ? parseInt(mixedPortMatch[1]) : 0;
-
-  const modeMatch = content.match(/^mode:\s*"?([^"\n]+)"?/m);
-  const mode = modeMatch ? modeMatch[1].trim() : 'rule';
-
-  const tunSectionMatch = content.match(/^tun:\n((?:[ \t]+[^\n]*\n?)*)/m);
-  let tunEnabled = false;
-  let tunStack = 'system';
-  if (tunSectionMatch) {
-    const block = tunSectionMatch[1];
-    tunEnabled = /^\s+enable:\s*true/m.test(block);
-    const stackMatch = block.match(/^\s+stack:\s*"?([^"\n]+)"?/m);
-    tunStack = stackMatch ? stackMatch[1].trim() : 'system';
-  }
-
-  return { mixedPort, mode, tunEnabled, tunStack };
-}
+import { parseClashVergeConfig, unavailableClashStatus } from './clash-status.js';
 
 const NET_BUCKETS = 48;
 
@@ -152,7 +133,9 @@ export default async function networkRoutes(fastify: FastifyInstance) {
 
   // POST /api/network/probe — 触发一次完整探测并写入 DB（后台定时 / 手动刷新用）
   fastify.post('/api/network/probe', async () => {
-    probeAll().catch(console.error);
+    probeAll().catch(() => {
+      fastify.log.error({ code: 'NETWORK_PROBE_FAILED' }, 'Background network probe failed');
+    });
     return { ok: true };
   });
 
@@ -212,16 +195,21 @@ export default async function networkRoutes(fastify: FastifyInstance) {
     return { ok: true, proxyUrl: trimmed };
   });
 
-  // GET /api/flclash — 读取 FlClash 运行配置
-  fastify.get('/api/flclash', async () => {
+  // GET /api/network/clash — 读取 Clash Verge 运行配置
+  fastify.get('/api/network/clash', async () => {
     try {
       const configPath = path.join(
-        homedir(), 'Library', 'Application Support', 'com.follow.clash', 'config.yaml'
+        homedir(), 'Library', 'Application Support',
+        'io.github.clash-verge-rev.clash-verge-rev', 'config.yaml'
       );
       const content = readFileSync(configPath, 'utf-8');
-      return parseFlClashConfig(content);
+      return parseClashVergeConfig(content);
     } catch {
-      return { mixedPort: 0, mode: 'unknown', tunEnabled: false, tunStack: 'system', error: 'config not found' };
+      fastify.log.warn(
+        { code: 'CLASH_CONFIG_UNAVAILABLE' },
+        'Clash Verge config unavailable',
+      );
+      return unavailableClashStatus;
     }
   });
 }
