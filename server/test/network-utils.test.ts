@@ -116,13 +116,50 @@ test('buildLatencySeries builds configured group and target sources into 48 chro
   ]);
 });
 
-test('buildLatencySeries skips invalid and unsupported series with sanitized warnings', () => {
+test('buildLatencySeries derives noncanonical group paths from target probes', () => {
+  const warnings: unknown[] = [];
+  const probeCalls: string[] = [];
+  const result = buildLatencySeries({
+    entries: [
+      { id: 'domestic-proxy', label: 'Domestic proxy', source: { kind: 'group', group: 'domestic', path: 'proxy' }, color: '#123456', order: 1 },
+      { id: 'international-direct', label: 'International direct', source: { kind: 'group', group: 'international', path: 'direct' }, color: '#654321', order: 2 },
+    ],
+    sinceMs: 0,
+    nowMs: 4_800,
+    getGroupStats: () => { throw new Error('noncanonical groups must use path probes'); },
+    getNetProbes: path => {
+      probeCalls.push(path);
+      return path === 'proxy' ? [
+        { id: 1, dest_id: 'baidu', path, up: 1, latency_ms: 50, probed_at: 50 },
+        { id: 2, dest_id: 'bilibili', path, up: 1, latency_ms: 70, probed_at: 50 },
+        { id: 3, dest_id: 'google', path, up: 1, latency_ms: 900, probed_at: 50 },
+        { id: 4, dest_id: 'baidu', path, up: 0, latency_ms: null, probed_at: 150 },
+      ] : [
+        { id: 5, dest_id: 'google', path, up: 1, latency_ms: 100, probed_at: 50 },
+        { id: 6, dest_id: 'chatgpt', path, up: 1, latency_ms: 300, probed_at: 50 },
+        { id: 7, dest_id: 'baidu', path, up: 1, latency_ms: 10, probed_at: 50 },
+      ];
+    },
+    logWarning: warning => warnings.push(warning),
+  });
+
+  assert.deepEqual(result.map(series => series.id), ['domestic-proxy', 'international-direct']);
+  assert.deepEqual(probeCalls, ['proxy', 'direct']);
+  assert.deepEqual(warnings, []);
+  assert.deepEqual(result[0].buckets.slice(0, 3), [
+    { startAt: 0, endAt: 100, latencyMs: 60, hasData: true },
+    { startAt: 100, endAt: 200, latencyMs: null, hasData: true },
+    { startAt: 200, endAt: 300, latencyMs: null, hasData: false },
+  ]);
+  assert.equal(result[1].buckets[0].latencyMs, 200);
+});
+
+test('buildLatencySeries skips invalid series with sanitized warnings', () => {
   const secret = 'secret-host.example:1234';
   const warnings: unknown[] = [];
   const result = buildLatencySeries({
     entries: [
       { id: 'bad-color', label: secret, source: { kind: 'target', targetId: 'google', path: 'proxy' }, color: secret, order: 1 },
-      { id: 'unsupported', label: secret, source: { kind: 'group', group: 'domestic', path: 'proxy' }, color: '#123456', order: 2 },
       { id: 'good', label: 'Good', source: { kind: 'target', targetId: 'google', path: 'proxy' }, color: '#654321', order: 3 },
     ],
     sinceMs: 0,
@@ -135,7 +172,6 @@ test('buildLatencySeries skips invalid and unsupported series with sanitized war
   assert.deepEqual(result.map(series => series.id), ['good']);
   assert.deepEqual(warnings, [
     { code: 'NETWORK_LATENCY_SERIES_SKIPPED', seriesId: 'bad-color', reason: 'invalid-color' },
-    { code: 'NETWORK_LATENCY_SERIES_SKIPPED', seriesId: 'unsupported', reason: 'unsupported-source' },
   ]);
   assert.equal(JSON.stringify(warnings).includes(secret), false);
 });

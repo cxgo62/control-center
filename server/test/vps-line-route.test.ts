@@ -131,6 +131,9 @@ test('VPS route returns accumulating data with latest metrics, selected-range lo
     tcpState: 'up',
     icmpUsable: true,
     probedAt: NOW - 60_000,
+    sent: 10,
+    lost: 0,
+    lossPercent: 0,
   });
   assert.deepEqual(body.rangeSummary, { hasData: true, sent: 20, lost: 1, lossPercent: 5 });
   assert.equal(body.buckets.length, 48);
@@ -153,7 +156,7 @@ test('VPS route returns available quality using five minutes while range loss su
   const recent = [
     sample({ id: 2, probedAt: NOW - 180_000 }),
     sample({ id: 3, probedAt: NOW - 120_000 }),
-    sample({ id: 4, probedAt: NOW - 60_000 }),
+    sample({ id: 4, probedAt: NOW - 60_000, sent: 100, received: 99 }),
   ];
   const app = await buildApp({
     discoveryState: { status: 'resolved', nodeName: 'private-config-name' },
@@ -164,7 +167,19 @@ test('VPS route returns available quality using five minutes while range loss su
   const body = (await app.inject('/api/network/vps-line?range=1h')).json();
   assert.equal(body.status, 'available');
   assert.deepEqual(body.quality, { state: 'good', label: '质量良好' });
-  assert.deepEqual(body.rangeSummary, { hasData: true, sent: 130, lost: 50, lossPercent: (50 / 130) * 100 });
+  assert.deepEqual(body.current, {
+    hasData: true,
+    medianLatencyMs: 100,
+    p95LatencyMs: 120,
+    jitterMs: 5,
+    tcpState: 'up',
+    icmpUsable: true,
+    probedAt: NOW - 60_000,
+    sent: 100,
+    lost: 1,
+    lossPercent: 1,
+  });
+  assert.deepEqual(body.rangeSummary, { hasData: true, sent: 220, lost: 51, lossPercent: (51 / 220) * 100 });
   assert.equal(body.buckets.some((bucket: { hasData: boolean }) => bucket.hasData), true);
   assert.equal(JSON.stringify(body).includes('private-config-name'), false);
   assert.equal(JSON.stringify(body).includes('host'), false);
@@ -193,6 +208,9 @@ test('VPS route uses the exact seven-day range and preserves all missing current
     tcpState: 'unknown',
     icmpUsable: null,
     probedAt: null,
+    sent: null,
+    lost: null,
+    lossPercent: null,
   });
   assert.deepEqual(body.rangeSummary, {
     hasData: false,
@@ -202,6 +220,19 @@ test('VPS route uses the exact seven-day range and preserves all missing current
   });
   assert.equal(body.buckets.length, 48);
   assert.equal(body.buckets.every((bucket: { hasData: boolean }) => !bucket.hasData), true);
+});
+
+test('VPS current metrics keep zero attempts distinct from zero packet loss', async t => {
+  const app = await buildApp({
+    discoveryState: { status: 'resolved', nodeName: 'private-config-name' },
+    samples: [sample({ sent: 0, received: 0, medianLatencyMs: null, p95LatencyMs: null, jitterMs: null, icmpUsable: false })],
+  });
+  t.after(() => app.close());
+
+  const body = (await app.inject('/api/network/vps-line?range=1h')).json();
+  assert.equal(body.current.sent, 0);
+  assert.equal(body.current.lost, 0);
+  assert.equal(body.current.lossPercent, null);
 });
 
 test('VPS route defaults invalid ranges to one hour and maps storage errors to a local safe response', async t => {

@@ -111,6 +111,7 @@ export function buildVpsLineResponse(
   const latest = selectedSamples.at(-1);
   const quality = classifyVpsLineQuality(selectedSamples, nowMs);
   const rangeAggregate = aggregateVpsBucket(selectedSamples);
+  const latestAggregate = latest ? aggregateVpsBucket([latest]) : null;
 
   return {
     status: quality.state === 'collecting' || !latest ? 'accumulating' as const : 'available' as const,
@@ -128,6 +129,9 @@ export function buildVpsLineResponse(
       tcpState: latest.tcpState,
       icmpUsable: latest.icmpUsable,
       probedAt: latest.probedAt,
+      sent: latestAggregate!.sent,
+      lost: latestAggregate!.lost,
+      lossPercent: latestAggregate!.lossPercent,
     } : {
       hasData: false,
       medianLatencyMs: null,
@@ -136,6 +140,9 @@ export function buildVpsLineResponse(
       tcpState: 'unknown' as const,
       icmpUsable: null,
       probedAt: null,
+      sent: null,
+      lost: null,
+      lossPercent: null,
     },
     rangeSummary: selectedSamples.length ? {
       hasData: true,

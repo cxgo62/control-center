@@ -1,4 +1,5 @@
 import {
+  NET_TARGETS,
   validateNetLatencySeries,
   type NetLatencyPath,
   type NetLatencySeries,
@@ -56,12 +57,6 @@ function createLatencyBuckets(values: readonly TimedValue[], sinceMs: number, no
   });
 }
 
-function isSupportedGroupSource(series: NetLatencySeries): boolean {
-  return series.source.kind !== 'group'
-    || series.source.group === 'domestic' && series.source.path === 'direct'
-    || series.source.group === 'international' && series.source.path === 'proxy';
-}
-
 function positiveLatency(value: number | null): number | null {
   return value !== null && Number.isFinite(value) && value > 0 ? value : null;
 }
@@ -78,29 +73,42 @@ export function buildLatencySeries(options: BuildLatencySeriesOptions): LatencyS
 
   const groupCache = new Map<string, GroupStat[]>();
   const probeCache = new Map<NetLatencyPath, NetProbe[]>();
+  const targetIdsByGroup = new Map([
+    ['domestic', new Set(NET_TARGETS.filter(target => target.group === 'domestic').map(target => target.id))],
+    ['international', new Set(NET_TARGETS.filter(target => target.group === 'international').map(target => target.id))],
+  ] as const);
   const output: LatencySeriesResponse[] = [];
 
   for (const series of validated.series) {
-    if (!isSupportedGroupSource(series)) {
-      options.logWarning({
-        code: 'NETWORK_LATENCY_SERIES_SKIPPED',
-        seriesId: series.id,
-        reason: 'unsupported-source',
-      });
-      continue;
-    }
-
     let values: TimedValue[];
     if (series.source.kind === 'group') {
-      let stats = groupCache.get(series.source.group);
-      if (!stats) {
-        stats = options.getGroupStats(series.source.group, options.sinceMs);
-        groupCache.set(series.source.group, stats);
+      const source = series.source;
+      const usesPreaggregatedStats = source.group === 'domestic' && source.path === 'direct'
+        || source.group === 'international' && source.path === 'proxy';
+      if (usesPreaggregatedStats) {
+        let stats = groupCache.get(source.group);
+        if (!stats) {
+          stats = options.getGroupStats(source.group, options.sinceMs);
+          groupCache.set(source.group, stats);
+        }
+        values = stats.map(stat => ({
+          timestamp: stat.computed_at,
+          latencyMs: positiveLatency(stat.avg_latency_ms),
+        }));
+      } else {
+        let probes = probeCache.get(source.path);
+        if (!probes) {
+          probes = options.getNetProbes(source.path, options.sinceMs);
+          probeCache.set(source.path, probes);
+        }
+        const targetIds = targetIdsByGroup.get(source.group)!;
+        values = probes
+          .filter(probe => targetIds.has(probe.dest_id))
+          .map(probe => ({
+            timestamp: probe.probed_at,
+            latencyMs: probe.up === 1 ? positiveLatency(probe.latency_ms) : null,
+          }));
       }
-      values = stats.map(stat => ({
-        timestamp: stat.computed_at,
-        latencyMs: positiveLatency(stat.avg_latency_ms),
-      }));
     } else {
       const targetId = series.source.targetId;
       let probes = probeCache.get(series.source.path);
