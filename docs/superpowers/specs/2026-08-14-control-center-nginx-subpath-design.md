@@ -31,15 +31,15 @@ Browser
 Nginx will gain two locations in the existing `damkeeper.top` server block:
 
 - Exact `/control-center` requests return a permanent `308` redirect to `/control-center/`.
-- `/control-center/` requests proxy to the existing control-center Vite listener at `[::1]:5173`, stripping the `/control-center/` prefix before forwarding upstream.
+- `/control-center/` requests proxy to the existing control-center Vite listener at `[::1]:5173` while preserving the complete request path.
 
 The existing `/cx-tools/` and `/` locations remain unchanged. No Cloudflare settings, hostnames, DNS records, tunnel ingress rules, or listening ports change.
 
 ## Client Path Handling
 
-Vite will use `/control-center/` as its base path. Browser-visible asset URLs will therefore remain under `/control-center/` even though Nginx strips that prefix before sending requests to Vite.
+Vite will use `/control-center/` as its base path. Browser-visible asset URLs and the upstream paths received by Vite will therefore remain under `/control-center/`. Preserving the prefix avoids the redirect loop that would occur if Vite received `/` and redirected it back to its configured base path.
 
-Client API requests will be built from Vite's base URL rather than from the domain root. For example, the browser requests `/control-center/api/services`; Nginx strips `/control-center/` and sends `/api/services` to Vite; Vite then applies its existing `/api` proxy to Fastify on port `9000`.
+Client API requests will be built from Vite's base URL rather than from the domain root. Vite will add an explicit `/control-center/api` proxy rule because proxy matching runs before Vite's base-path middleware. For example, the browser and Nginx both send `/control-center/api/services` to Vite; that proxy rule rewrites it to `/api/services` and forwards it to Fastify on port `9000`. The existing `/api` proxy remains available for direct development compatibility.
 
 This keeps all browser traffic on the public Nginx origin and preserves the current internal API proxy behavior observed on port `5173`.
 
@@ -67,7 +67,7 @@ Automated tests will first establish the required client base-path behavior and 
 1. Client tests verify that API URLs are rooted under `/control-center/api/`.
 2. The client production build verifies asset URLs are rooted under `/control-center/`.
 3. `nginx -t` validates the complete Nginx configuration before reload.
-4. Local requests through Nginx verify the redirect, HTML, static assets, and an API endpoint.
+4. Local requests through Nginx verify that `/control-center` redirects once, `/control-center/` returns HTML with status `200` without another redirect, and a static asset and API endpoint both succeed.
 5. Smoke checks confirm `/cx-tools/` and `/` still resolve through their original upstreams.
 6. The Nginx reload occurs only after configuration validation succeeds.
 
