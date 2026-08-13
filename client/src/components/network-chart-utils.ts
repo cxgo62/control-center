@@ -1,4 +1,4 @@
-import type { LatencySeries, VpsLineBucket } from '../types.js';
+import type { LatencyBucket, LatencySeries, VpsLineBucket } from '../types.js';
 
 export type LatencyTooltipRow = {
   id: string;
@@ -53,7 +53,7 @@ function shanghaiDateTime(value: Date): ShanghaiDateTime {
   };
 }
 
-function formatInterval(startAt: number, endAt: number): string {
+export function formatBucketInterval(startAt: number, endAt: number): string {
   const start = new Date(startAt);
   const end = new Date(endAt);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return '无效时间';
@@ -83,17 +83,75 @@ export function latencyBucketIndexAtX(
 
 /** Produces one tooltip row per configured series, retaining server order and colors. */
 export function buildLatencyTooltipRows(series: readonly LatencySeries[], bucketIndex: number): LatencyTooltipRow[] {
-  return series.map(item => ({
-    id: item.id,
-    label: item.label,
-    color: item.color,
-    value: formatMilliseconds(item.buckets[bucketIndex]?.latencyMs ?? null),
-  }));
+  return series.map(item => {
+    const bucket = item.buckets[bucketIndex];
+    return {
+      id: item.id,
+      label: item.label,
+      color: item.color,
+      value: formatMilliseconds(bucket?.hasData ? bucket.latencyMs : null),
+    };
+  });
+}
+
+/** Resolves a status metric by stable series id; valid zero-latency samples participate. */
+export function averageLatencyForSeries(series: readonly LatencySeries[], seriesId: string): number | null {
+  const item = series.find(candidate => candidate.id === seriesId);
+  if (!item) return null;
+  const values = item.buckets
+    .filter(bucket => bucket.hasData && bucket.latencyMs !== null && Number.isFinite(bucket.latencyMs))
+    .map(bucket => bucket.latencyMs as number);
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+/** Returns a stable rounded chart ceiling across an arbitrary set of configured series. */
+export function latencyChartMaximum(series: readonly LatencySeries[]): number {
+  const values = series.flatMap(item => item.buckets
+    .filter(bucket => bucket.hasData && bucket.latencyMs !== null && Number.isFinite(bucket.latencyMs))
+    .map(bucket => bucket.latencyMs as number));
+  const maximum = values.length ? Math.max(...values) : 0;
+  return Math.max(40, Math.ceil((maximum * 1.2) / 20) * 20);
+}
+
+/** Builds one SVG path, restarting after explicit missing buckets and retaining 0 ms samples. */
+export function latencyPath(
+  buckets: readonly LatencyBucket[],
+  xForIndex: (index: number) => number,
+  yForValue: (value: number) => number,
+): string {
+  let path = '';
+  let penDown = false;
+  buckets.forEach((bucket, index) => {
+    const value = bucket.latencyMs;
+    if (!bucket.hasData || value === null || !Number.isFinite(value)) {
+      penDown = false;
+      return;
+    }
+    path += `${penDown ? ' L' : path ? ' M' : 'M'}${xForIndex(index).toFixed(1)} ${yForValue(value).toFixed(1)}`;
+    penDown = true;
+  });
+  return path;
+}
+
+export function packetLossColor(lossPercent: number | null): string {
+  if (lossPercent === null || !Number.isFinite(lossPercent)) return 'rgba(255,255,255,.10)';
+  if (lossPercent < 1) return '#3fb950';
+  if (lossPercent < 5) return '#d9a531';
+  return '#f15a4a';
+}
+
+export function shouldCommitRangeResponse(
+  requestedRange: string,
+  currentRange: string,
+  requestId: number,
+  latestRequestId: number,
+): boolean {
+  return requestedRange === currentRange && requestId === latestRequestId;
 }
 
 /** Builds the shared latency/loss tooltip content for one VPS bucket. */
 export function buildVpsTooltip(bucket: VpsLineBucket): VpsTooltipViewModel {
-  const interval = formatInterval(bucket.startAt, bucket.endAt);
+  const interval = formatBucketInterval(bucket.startAt, bucket.endAt);
   if (!bucket.hasData) return { interval, message: '该时段无探测数据' };
   return {
     interval,

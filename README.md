@@ -92,12 +92,46 @@ PROXY_URL=http://127.0.0.1:7890 ./start.sh
 
 ---
 
+## 配置搬瓦工私人线路监控
+
+网络页可以独立监控一个私人 Clash Verge 节点。`VPS_LINE_NODE_NAME` 填写的是 **Clash 节点名**，不是 IP、域名或订阅地址；去除首尾空格后必须与生成的 `clash-verge.yaml` 中节点名完全一致：
+
+```bash
+VPS_LINE_NODE_NAME='Clash Verge 中的完整节点名' ./start.sh
+```
+
+未设置或只包含空格时，服务和其他网络卡片仍会运行，私人线路卡显示“私人节点未配置”；名称无法精确匹配时显示“无法识别私人节点”。
+
+监控刻意拆成两种频率：服务启动、Clash 配置文件变化、每 30 分钟兜底检查以及连续失败后的受限恢复检查才会重新发现节点；正常线路探测每 60 秒使用内存中的已解析目标，执行 10 次 ICMP 和一次有限超时的 TCP 连接。它不会运行下载或带宽测试。
+
+隐私边界如下：浏览器只收到固定标签“搬瓦工私人线路”和聚合质量数据；解析出的地址、端口和 Clash 凭据不会写入 SQLite、返回浏览器或写入日志。数据库只保存节点名及每轮聚合样本。
+
+macOS 通常允许普通用户运行 `/sbin/ping`。如果 LaunchAgent 所在环境或本机安全策略阻止 ICMP，但代理端口仍可连接，卡片会显示“Ping 不可用 · 代理端口正常”；这不等同于主机离线。
+
+### 当前 macOS 生产运行方式
+
+仓库内的生产入口是 `server/start-prod.sh`，它由 `server/supervisor.mjs` 监督前后端进程。当前机器的 LaunchAgent 是 `~/Library/LaunchAgents/com.cx.control-center.plist`，label 为 `com.cx.control-center`。首次将 `VPS_LINE_NODE_NAME` 加入该 plist 的 `EnvironmentVariables` 后，使用现有流程构建并重新载入 LaunchAgent：
+
+```bash
+cd /Users/cx/cx/control-center
+npm --prefix server run build
+npm --prefix client run build
+launchctl bootout gui/$(id -u) /Users/cx/Library/LaunchAgents/com.cx.control-center.plist
+launchctl bootstrap gui/$(id -u) /Users/cx/Library/LaunchAgents/com.cx.control-center.plist
+```
+
+未修改 plist、只发布源代码时，可使用 `launchctl kickstart -k gui/$(id -u)/com.cx.control-center` 重启现有任务。单独 `kickstart` 不会重新读取 plist 配置。也可以直接运行仓库中存在的 `./server/start-prod.sh` 做前台诊断。
+
+---
+
 ## 探测频率
 
 | 类型 | 频率 | 存储时长 |
 |---|---|---|
 | 服务健康检查 | 每 30 秒 | 30 天 |
 | 网络连通性探测 | 每 5 分钟 | 30 天 |
+| 私人 VPS 线路探测 | 每 60 秒 | 30 天 |
+| 私人节点兜底发现 | 每 30 分钟 | 不落库 |
 
 数据存储在项目根目录的 `data.db`（SQLite）。
 
@@ -190,5 +224,6 @@ control-center/
 | POST | `/api/services/:id/action` | `{ action: "start"\|"stop"\|"restart"\|"probe" }` |
 | GET | `/api/services/:id/logs` | `?lines=40`，返回日志行 |
 | GET | `/api/events` | 最近 10 条操作事件 |
-| GET | `/api/network/data` | `?range=1h\|6h\|24h\|7d`，返回探测数据 |
+| GET | `/api/network/data` | `?range=1h\|6h\|24h\|7d`，返回探测数据和可配置延迟序列 |
+| GET | `/api/network/vps-line` | `?range=1h\|6h\|24h\|7d`，返回私人线路聚合质量数据 |
 | POST | `/api/network/probe` | 立即触发一次全量网络探测 |

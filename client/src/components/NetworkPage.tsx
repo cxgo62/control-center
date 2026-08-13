@@ -1,11 +1,11 @@
 import React from 'react';
-import type { NetworkData, NetDest, NetBucket } from '../types.js';
+import type { NetworkData, NetDest, NetBucket, NetworkRange, VpsLineResponse } from '../types.js';
 import { api, type ClashStatus, type KiwiVmTrafficResponse, type KiwiVmTrafficSuccess } from '../api.js';
 import { StatusDot, ToastStack, useToast, fmtAgo } from './Shared.js';
 import { cardHoverPosition, formatBucketTooltip } from './uptime-bar-tooltip.js';
 import { formatShanghaiResetTime, formatTrafficBytes, formatUsagePercent } from './kiwivm-format.js';
-
-const NET_BUCKETS = 48;
+import { averageLatencyForSeries, shouldCommitRangeResponse } from './network-chart-utils.js';
+import { GenericLatencyChart, NetworkStatusBar, VpsLineCard } from './NetworkQualityCards.js';
 
 const NET_RANGES = [
   { key: '1h',  label: '1 小时',  ticks: ['-60分', '-45分', '-30分', '-15分', '现在'] },
@@ -18,99 +18,20 @@ function availColor(a: number): string {
   return a >= 99.5 ? '#3fb950' : a >= 98 ? '#7bcf4f' : a >= 93 ? '#d9a531' : '#f15a4a';
 }
 
-function useWidth(): [React.RefObject<HTMLDivElement>, number] {
+function useElementWidth(initial: number): [React.RefObject<HTMLDivElement>, number] {
   const ref = React.useRef<HTMLDivElement>(null);
-  const [w, setW] = React.useState(760);
+  const [width, setWidth] = React.useState(initial);
   React.useEffect(() => {
     if (!ref.current || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(es => {
-      for (const e of es) setW(e.contentRect.width);
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) setWidth(entry.contentRect.width);
     });
-    ro.observe(ref.current);
-    return () => ro.disconnect();
-  }, []);
-  return [ref, w];
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  });
+  return [ref, width];
 }
 
-// ---- Dual-line latency chart ----
-interface NetLineChartProps {
-  lineDirect: number[];
-  lineProxy: number[];
-  ticks: string[];
-}
-
-function NetLineChart({ lineDirect, lineProxy, ticks }: NetLineChartProps) {
-  const [ref, w] = useWidth();
-  const h = 200, padL = 40, padR = 12, padT = 14, padB = 26;
-  const iw = Math.max(60, w - padL - padR);
-  const ih = h - padT - padB;
-
-  const all = [...lineDirect, ...lineProxy].filter(v => v > 0);
-  const max = Math.max(40, Math.ceil((Math.max(...all, 1) * 1.2) / 20) * 20);
-
-  const X = (i: number) => padL + (i / (NET_BUCKETS - 1)) * iw;
-  const Y = (v: number) => padT + ih - (v / max) * ih;
-
-  const pathStr = (arr: number[]) => {
-    let d = '', pen = false;
-    arr.forEach((v, i) => {
-      if (v <= 0) { pen = false; return; }
-      d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1) + ' ';
-      pen = true;
-    });
-    return d.trim();
-  };
-
-  const areaPath = (arr: number[], gid: string) => {
-    const pts = arr.map((v, i) => [X(i), v > 0 ? Y(v) : null] as [number, number | null]).filter(p => p[1] !== null) as [number, number][];
-    if (pts.length < 2) return null;
-    const d = 'M' + pts.map(p => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' L')
-      + ` L${pts[pts.length - 1][0].toFixed(1)} ${padT + ih} L${pts[0][0].toFixed(1)} ${padT + ih} Z`;
-    return <path d={d} fill={`url(#${gid})`} />;
-  };
-
-  const grid = [0, 0.25, 0.5, 0.75, 1];
-
-  return (
-    <div ref={ref} style={{ width: '100%' }}>
-      <svg width={w} height={h} style={{ display: 'block' }}>
-        <defs>
-          <linearGradient id="ngD" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#5aa0fa" stopOpacity=".22" />
-            <stop offset="1" stopColor="#5aa0fa" stopOpacity="0" />
-          </linearGradient>
-          <linearGradient id="ngP" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#9b8cfa" stopOpacity=".22" />
-            <stop offset="1" stopColor="#9b8cfa" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        {grid.map((g, i) => {
-          const y = padT + ih - g * ih;
-          return (
-            <g key={i}>
-              <line x1={padL} y1={y} x2={w - padR} y2={y} stroke="rgba(255,255,255,.055)" strokeWidth="1" />
-              <text x={padL - 8} y={y + 3.5} textAnchor="end" fontSize="10" fill="#525a66" fontFamily="'JetBrains Mono',monospace">
-                {Math.round(g * max)}
-              </text>
-            </g>
-          );
-        })}
-        {ticks.map((t, i) => {
-          const x = padL + (i / (ticks.length - 1)) * iw;
-          return (
-            <text key={i} x={x} y={h - 7}
-              textAnchor={i === 0 ? 'start' : i === ticks.length - 1 ? 'end' : 'middle'}
-              fontSize="10" fill="#525a66" fontFamily="'JetBrains Mono',monospace">{t}</text>
-          );
-        })}
-        {areaPath(lineDirect, 'ngD')}
-        {areaPath(lineProxy, 'ngP')}
-        <path d={pathStr(lineProxy)} fill="none" stroke="#9b8cfa" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-        <path d={pathStr(lineDirect)} fill="none" stroke="#5aa0fa" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-      </svg>
-    </div>
-  );
-}
 
 // ---- Uptime bar ----
 interface UptimeBarProps {
@@ -263,61 +184,6 @@ function NetRegionCard({ title, sub, accent, path, targets, ticks }: NetRegionCa
       {/* Time axis */}
       <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 8, fontSize: 9.5, color: '#525a66', fontFamily: '"JetBrains Mono",monospace', flex: 'none' }}>
         <span>{ticks[0]}</span><span>{ticks[Math.floor(ticks.length / 2)]}</span><span>{ticks[ticks.length - 1]}</span>
-      </div>
-    </div>
-  );
-}
-
-// ---- Summary card (top-right grid cell) ----
-interface SummaryCardProps {
-  overall: number;
-  dAvg: number;
-  pAvg: number;
-  onN: number;
-  totalN: number;
-  probedAt: number;
-  range: string;
-  onRangeChange: (r: string) => void;
-}
-
-function SummaryCard({ overall, dAvg, pAvg, onN, totalN, probedAt, range, onRangeChange }: SummaryCardProps) {
-  const Metric = ({ label, value, unit, color }: { label: string; value: string | number; unit: string; color?: string }) => (
-    <div style={{ padding: '12px 14px', background: 'rgba(255,255,255,.03)', borderRadius: 10, border: '1px solid rgba(255,255,255,.06)' }}>
-      <div style={{ fontSize: 9.5, letterSpacing: '.1em', textTransform: 'uppercase', color: '#6b7482', fontWeight: 700, marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 800, color: color ?? '#e9eef4', fontFamily: '"JetBrains Mono",monospace', lineHeight: 1 }}>
-        {value}<span style={{ fontSize: 11, color: '#6b7482', marginLeft: 2 }}>{unit}</span>
-      </div>
-    </div>
-  );
-
-  return (
-    <div style={{
-      background: '#10151d', border: '1px solid rgba(255,255,255,.07)',
-      borderRadius: 16, padding: '16px 18px',
-      display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 'none' }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: '#cdd6e1' }}>概览</span>
-        <span style={{ fontSize: 10, color: '#525a66', fontFamily: '"JetBrains Mono",monospace' }}>
-          最后探测 {fmtAgo(probedAt)}
-        </span>
-        {/* Time range selector */}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 2, background: '#0c1016', border: '1px solid rgba(255,255,255,.08)', borderRadius: 8, padding: 2 }}>
-          {NET_RANGES.map(r => (
-            <button key={r.key} onClick={() => onRangeChange(r.key)} style={{
-              padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer',
-              fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
-              background: range === r.key ? 'rgba(90,160,250,.18)' : 'transparent',
-              color: range === r.key ? '#7fb4ff' : '#6b7482', transition: 'all .14s',
-            }}>{r.label}</button>
-          ))}
-        </div>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, flex: 1 }}>
-        <Metric label="整体可用率" value={overall.toFixed(1)} unit="%" color={availColor(overall)} />
-        <Metric label="探测点在线" value={`${onN}/${totalN}`} unit="" color={onN === totalN ? '#3fb950' : '#d9a531'} />
-        <Metric label="国内均值" value={dAvg || '—'} unit={dAvg ? 'ms' : ''} color="#3fb950" />
-        <Metric label="国际均值" value={pAvg || '—'} unit={pAvg ? 'ms' : ''} color="#9b8cfa" />
       </div>
     </div>
   );
@@ -795,17 +661,26 @@ type PingResult = Record<string, Record<string, { up: boolean; latencyMs: number
 
 // ---- Main NetworkPage ----
 export function NetworkPage() {
-  const [range, setRange] = React.useState('1h');
+  const [range, setRange] = React.useState<NetworkRange>('1h');
   const [data, setData] = React.useState<NetworkData | null>(null);
+  const [vpsLine, setVpsLine] = React.useState<VpsLineResponse | null>(null);
   const [ping, setPing] = React.useState<PingResult | null>(null); // 实时探测结果（不入库）
   const [probing, setProbing] = React.useState(false);
   const [, tick] = React.useState(0);
+  const selectedRangeRef = React.useRef<NetworkRange>(range);
+  const dataRequestIdRef = React.useRef(0);
+  const [contentRef, contentWidth] = useElementWidth(900);
+  selectedRangeRef.current = range;
   const toast = useToast();
 
-  const fetchData = React.useCallback(async (r: string) => {
+  const fetchData = React.useCallback(async (r: NetworkRange) => {
+    if (r !== selectedRangeRef.current) return;
+    const requestId = ++dataRequestIdRef.current;
     try {
       const result = await api.getNetworkData(r);
-      setData(result);
+      if (shouldCommitRangeResponse(r, selectedRangeRef.current, requestId, dataRequestIdRef.current)) {
+        setData(result);
+      }
     } catch {
       // ignore errors silently
     }
@@ -813,6 +688,7 @@ export function NetworkPage() {
 
   // Initial fetch + on range change
   React.useEffect(() => {
+    setData(null);
     fetchData(range);
   }, [range, fetchData]);
 
@@ -821,6 +697,26 @@ export function NetworkPage() {
     const t = setInterval(() => fetchData(range), 60_000);
     return () => clearInterval(t);
   }, [range, fetchData]);
+
+  // VPS data has a card-local lifecycle so a route/storage failure does not disturb the rest of the page.
+  React.useEffect(() => {
+    let alive = true;
+    setVpsLine(null);
+    const load = async () => {
+      try {
+        const response = await api.getVpsLine(range);
+        if (alive) setVpsLine(response);
+      } catch {
+        if (alive) setVpsLine({
+          status: 'error', displayLabel: '搬瓦工私人线路',
+          error: { code: 'VPS_LINE_DATA_UNAVAILABLE', message: '线路数据暂时不可用' },
+        });
+      }
+    };
+    load();
+    const timer = setInterval(load, 60_000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [range]);
 
   // 前台实时 ping：页面可见时每 10s 探一次，结果不入库，仅覆盖当前显示的延迟和状态
   React.useEffect(() => {
@@ -867,7 +763,7 @@ export function NetworkPage() {
       await api.probeNetwork();
       toast.push('已重新探测全部链路');
       // Refresh after a short delay to get new data
-      setTimeout(() => fetchData(range), 1500);
+      setTimeout(() => fetchData(selectedRangeRef.current), 1500);
     } catch {
       toast.push('探测请求失败');
     } finally {
@@ -876,6 +772,7 @@ export function NetworkPage() {
   };
 
   const rangeInfo = NET_RANGES.find(r => r.key === range) ?? NET_RANGES[0];
+  const narrowContent = contentWidth < 760;
 
   // Empty state / loading
   if (!data) {
@@ -893,18 +790,10 @@ export function NetworkPage() {
   const allT = [...data.direct, ...data.proxy];
   const overall = allT.length > 0 ? allT.reduce((a, t) => a + t.avail, 0) / allT.length : 0;
   const onN = allT.filter(t => t.up).length;
-  const avg = (arr: number[]) => { const v = arr.filter(x => x > 0); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : 0; };
-  // Temporary compatibility for the legacy two-line component. The normalized API
-  // promises configured order; 0 is already a visual gap in the legacy renderer,
-  // so both absent and null buckets remain gaps rather than successful points.
-  // Task 6 replaces this bridge with generic latencySeries rendering.
-  const legacyLatencyLines = data.latencySeries.slice(0, 2).map(series =>
-    series.buckets.map(bucket => bucket.hasData && bucket.latencyMs !== null ? bucket.latencyMs : 0)
-  );
-  const lineDomestic = legacyLatencyLines[0] ?? [];
-  const lineInternational = legacyLatencyLines[1] ?? [];
-  const dAvg = avg(lineDomestic);
-  const pAvg = avg(lineInternational);
+  const dAverage = averageLatencyForSeries(data.latencySeries, 'domestic');
+  const iAverage = averageLatencyForSeries(data.latencySeries, 'international');
+  const dAvg = dAverage === null ? null : Math.round(dAverage);
+  const pAvg = iAverage === null ? null : Math.round(iAverage);
 
   // 将实时 ping 结果覆盖到目标的当前状态（不影响历史桶和可用率）
   const applyPing = (targets: typeof data.direct, path: 'direct' | 'proxy') =>
@@ -939,59 +828,38 @@ export function NetworkPage() {
         international={linkStats(international)}
       />
 
-      {/* 2×2 grid */}
-      <div style={{
+      {/* Compact status row + two content rows */}
+      <div ref={contentRef} style={{
         flex: 1, minWidth: 0,
         display: 'grid',
-        gridTemplateColumns: '1fr 2fr',
-        gridTemplateRows: '1fr 1fr',
+        gridTemplateColumns: narrowContent ? 'minmax(0,1fr)' : 'minmax(260px,1fr) minmax(0,2fr)',
+        gridTemplateRows: narrowContent ? 'auto repeat(4,minmax(300px,auto))' : 'auto minmax(0,1fr) minmax(0,1fr)',
         gap: 14,
+        overflowY: narrowContent ? 'auto' : 'visible',
+        paddingRight: narrowContent ? 4 : 0,
       }}>
 
-        {/* Top-left: 国内连通性 (direct path) */}
+        <NetworkStatusBar
+          overall={overall} online={onN} total={allT.length}
+          domesticAverage={dAvg} internationalAverage={pAvg}
+          probedAt={data.probedAt} range={range} onRangeChange={setRange}
+        />
+
         <NetRegionCard
           title="国内连通性" sub="DOMESTIC"
           accent="#3fb950" path="direct"
           targets={domestic} ticks={rangeInfo.ticks}
         />
 
-        {/* Top-right: 概览 + 时间范围 */}
-        <SummaryCard
-          overall={overall} dAvg={dAvg} pAvg={pAvg}
-          onN={onN} totalN={allT.length}
-          probedAt={data.probedAt}
-          range={range} onRangeChange={setRange}
-        />
+        <VpsLineCard response={vpsLine} />
 
-        {/* Bottom-left: 国际连通性 (proxy path) */}
         <NetRegionCard
           title="国际连通性" sub="INTERNATIONAL"
           accent="#9b8cfa" path="proxy"
           targets={international} ticks={rangeInfo.ticks}
         />
 
-        {/* Bottom-right: 延迟对比图表 */}
-        <div style={{
-          background: '#10151d', border: '1px solid rgba(255,255,255,.07)',
-          borderRadius: 16, padding: '14px 16px 10px',
-          display: 'flex', flexDirection: 'column', minHeight: 0,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6, flex: 'none' }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#e9eef4' }}>延迟对比</span>
-            <div style={{ display: 'flex', gap: 14, marginLeft: 'auto' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#aab4c2' }}>
-                <span style={{ width: 12, height: 3, borderRadius: 2, background: '#3fb950' }} />国内
-              </span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#aab4c2' }}>
-                <span style={{ width: 12, height: 3, borderRadius: 2, background: '#9b8cfa' }} />国际
-              </span>
-              <span style={{ fontSize: 10.5, color: '#525a66', fontFamily: '"JetBrains Mono",monospace' }}>ms</span>
-            </div>
-          </div>
-          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-            <NetLineChart lineDirect={lineDomestic} lineProxy={lineInternational} ticks={rangeInfo.ticks} />
-          </div>
-        </div>
+        <GenericLatencyChart series={data.latencySeries} />
 
       </div>
 

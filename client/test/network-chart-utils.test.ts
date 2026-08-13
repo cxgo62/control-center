@@ -2,10 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { LatencySeries, VpsLineBucket } from '../src/types.js';
 import {
+  averageLatencyForSeries,
   buildLatencyTooltipRows,
   buildVpsTooltip,
   clampTooltipCenterX,
+  latencyChartMaximum,
   latencyBucketIndexAtX,
+  latencyPath,
+  packetLossColor,
+  shouldCommitRangeResponse,
 } from '../src/components/network-chart-utils.js';
 
 const latencySeries: LatencySeries[] = [
@@ -68,6 +73,14 @@ test('shows missing buckets and absent series buckets as 无数据', () => {
   assert.deepEqual(buildLatencyTooltipRows(incomplete, 1).map(row => row.value), ['28ms', '无数据', '20ms', '71ms', '无数据']);
 });
 
+test('treats hasData false as missing even if a stale numeric value is present', () => {
+  const stale: LatencySeries[] = [{
+    id: 'stale', label: '旧值', color: '#fff',
+    buckets: [{ startAt: 0, endAt: 1, latencyMs: 0, hasData: false }],
+  }];
+  assert.equal(buildLatencyTooltipRows(stale, 0)[0].value, '无数据');
+});
+
 test('uses one VPS bucket index for latency and packet-loss hover layers', () => {
   const index = latencyBucketIndexAtX(160, 300, 40, 20, 3);
   assert.equal(index, 1);
@@ -123,4 +136,44 @@ test('clamps centered tooltip positions inside both card edges', () => {
   assert.equal(clampTooltipCenterX(5, 120, 400, 8), 68);
   assert.equal(clampTooltipCenterX(200, 120, 400, 8), 200);
   assert.equal(clampTooltipCenterX(395, 120, 400, 8), 332);
+});
+
+test('resolves latency averages by series id, including valid zero values', () => {
+  assert.equal(averageLatencyForSeries(latencySeries, 'domestic'), 14);
+  assert.equal(averageLatencyForSeries(latencySeries, 'proxy'), 65.5);
+  assert.equal(averageLatencyForSeries(latencySeries, 'missing'), null);
+});
+
+test('builds generic chart paths with gaps for missing buckets while rendering zero', () => {
+  assert.equal(
+    latencyPath(latencySeries[0].buckets, index => index * 10, value => 100 - value),
+    'M0.0 100.0 L10.0 72.0',
+  );
+  const explicitGap: LatencySeries = {
+    id: 'gap', label: 'Gap', color: '#fff', buckets: [
+      { startAt: 0, endAt: 1, latencyMs: 10, hasData: true },
+      { startAt: 1, endAt: 2, latencyMs: 0, hasData: false },
+      { startAt: 2, endAt: 3, latencyMs: 20, hasData: true },
+    ],
+  };
+  assert.equal(latencyPath(explicitGap.buckets, index => index * 10, value => 100 - value), 'M0.0 90.0 M20.0 80.0');
+});
+
+test('scales across every finite non-null latency and safely handles empty data', () => {
+  assert.equal(latencyChartMaximum(latencySeries), 100);
+  assert.equal(latencyChartMaximum([]), 40);
+});
+
+test('maps packet loss thresholds and missing samples to exact band colors', () => {
+  assert.equal(packetLossColor(null), 'rgba(255,255,255,.10)');
+  assert.equal(packetLossColor(0), '#3fb950');
+  assert.equal(packetLossColor(1), '#d9a531');
+  assert.equal(packetLossColor(4.99), '#d9a531');
+  assert.equal(packetLossColor(5), '#f15a4a');
+});
+
+test('commits only the latest response for the currently selected range', () => {
+  assert.equal(shouldCommitRangeResponse('1h', '1h', 4, 4), true);
+  assert.equal(shouldCommitRangeResponse('7d', '1h', 4, 4), false);
+  assert.equal(shouldCommitRangeResponse('1h', '1h', 3, 4), false);
 });
