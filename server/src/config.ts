@@ -238,7 +238,6 @@ export function validateNetLatencySeries(entries: readonly unknown[]): { series:
       warnings.push({ id, reason: 'duplicate-id' });
       continue;
     }
-    ids.add(id);
     const source = candidate.source as Record<string, unknown>;
     if (!isPath(source.path)) {
       warnings.push({ id, reason: 'invalid-path' });
@@ -253,6 +252,7 @@ export function validateNetLatencySeries(entries: readonly unknown[]): { series:
         warnings.push({ id, reason: 'invalid-group' });
         continue;
       }
+      ids.add(id);
       series.push({ id, label: candidate.label, source: { kind: 'group', group: source.group, path: source.path }, color: candidate.color, order: candidate.order });
       continue;
     }
@@ -261,6 +261,7 @@ export function validateNetLatencySeries(entries: readonly unknown[]): { series:
         warnings.push({ id, reason: 'unknown-target' });
         continue;
       }
+      ids.add(id);
       series.push({ id, label: candidate.label, source: { kind: 'target', targetId: source.targetId, path: source.path }, color: candidate.color, order: candidate.order });
       continue;
     }

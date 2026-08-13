@@ -36,3 +36,15 @@ test('validator retains known group and target series while skipping invalid and
     { id: 'seven-digit-color', reason: 'invalid-color' },
   ]);
 });
+
+test('validator permits a valid later entry to reuse an invalid entry id', () => {
+  const result = validateNetLatencySeries([
+    { id: 'reused', label: 'Invalid', source: { kind: 'group', group: 'domestic', path: 'direct' }, color: '#12345', order: 1 },
+    { id: 'reused', label: 'Valid', source: { kind: 'target', targetId: 'google', path: 'proxy' }, color: '#123456', order: 2 },
+  ]);
+
+  assert.deepEqual(result.series, [
+    { id: 'reused', label: 'Valid', source: { kind: 'target', targetId: 'google', path: 'proxy' }, color: '#123456', order: 2 },
+  ]);
+  assert.deepEqual(result.warnings, [{ id: 'reused', reason: 'invalid-color' }]);
+});

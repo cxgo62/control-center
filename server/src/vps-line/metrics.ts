@@ -66,10 +66,10 @@ export function classifyVpsLineQuality(samples: readonly VpsLineSampleMetrics[],
   if (!received) return { state: 'ping-unavailable' };
   const medianLatencyMs = median(window.flatMap(sample => sample.medianLatencyMs === null ? [] : [sample.medianLatencyMs]));
   const jitters = window.flatMap(sample => sample.jitterMs === null ? [] : [sample.jitterMs]);
-  if (!sent || medianLatencyMs === null || !jitters.length) return { state: 'unavailable' };
+  if (!sent || medianLatencyMs === null) return { state: 'unavailable' };
   const lossPercent = ((sent - received) / sent) * 100;
-  const jitterMs = jitters.reduce((sum, jitter) => sum + jitter, 0) / jitters.length;
-  if (lossPercent >= 5 || jitterMs >= 50 || medianLatencyMs >= 400) return { state: 'poor' };
-  if (lossPercent >= 1 || jitterMs >= 20 || medianLatencyMs >= 250) return { state: 'degraded' };
+  const jitterMs = jitters.length ? jitters.reduce((sum, jitter) => sum + jitter, 0) / jitters.length : null;
+  if (lossPercent >= 5 || (jitterMs !== null && jitterMs >= 50) || medianLatencyMs >= 400) return { state: 'poor' };
+  if (lossPercent >= 1 || (jitterMs !== null && jitterMs >= 20) || medianLatencyMs >= 250) return { state: 'degraded' };
   return { state: 'good' };
 }

@@ -32,6 +32,21 @@ test('gives current TCP failures immediate poor quality and preserves ICMP/TCP d
   assert.deepEqual(classifyVpsLineQuality([{ ...base, received: 0 }, { ...base, probedAt: 2, received: 0 }, { ...base, probedAt: 3, received: 0 }], 3), { state: 'ping-unavailable' });
 });
 
+test('classifies partial ICMP success from available loss and latency when jitter is unavailable', () => {
+  const oneReply = { sent: 10, received: 1, medianLatencyMs: 100, p95LatencyMs: 100, jitterMs: null, tcpState: 'up' as const };
+  assert.deepEqual(classifyVpsLineQuality([
+    { ...oneReply, probedAt: 1 }, { ...oneReply, probedAt: 2 }, { ...oneReply, probedAt: 3 },
+  ], 3), { state: 'poor' });
+
+  const success = { sent: 1, received: 1, medianLatencyMs: 100, p95LatencyMs: 100, jitterMs: null, tcpState: 'up' as const };
+  assert.deepEqual(classifyVpsLineQuality([
+    { ...success, probedAt: 1 }, { ...success, probedAt: 2 }, { ...success, probedAt: 3 },
+  ], 3), { state: 'good' });
+  assert.deepEqual(classifyVpsLineQuality([
+    { ...success, medianLatencyMs: 250, probedAt: 1 }, { ...success, medianLatencyMs: 250, probedAt: 2 }, { ...success, medianLatencyMs: 250, probedAt: 3 },
+  ], 3), { state: 'degraded' });
+});
+
 test('uses the latest timestamp rather than input order for the TCP quality state', () => {
   const base = { sent: 10, received: 10, medianLatencyMs: 100, p95LatencyMs: 100, jitterMs: 1 };
   assert.deepEqual(classifyVpsLineQuality([
