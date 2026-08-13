@@ -2,7 +2,7 @@
 
 ## Goal
 
-Expose the existing control center at `https://damkeeper.top/control-center/` through the existing Nginx and Cloudflare Tunnel path. Remove the legacy `/cx-tools/` route that points to `127.0.0.1:6177`. Do not change Cloudflare configuration and do not add any listening ports.
+Expose the existing control center at `https://damkeeper.top/control-center/` through the existing Nginx and Cloudflare Tunnel path. Remove the local `/etc/hosts` override that maps `damkeeper.top` and `www.damkeeper.top` to `127.0.0.1`, so this Mac resolves the domain through normal DNS and Cloudflare Access. Do not change Cloudflare configuration and do not add any listening ports.
 
 Cloudflare Access already protects the domain, so this change does not add a second authentication layer.
 
@@ -15,6 +15,7 @@ Cloudflare Access already protects the domain, so this change does not add a sec
   - Fastify on port `9000` for backend APIs.
 - Browser requests use port `5173`. Vite proxies `/api/*` internally to Fastify on port `9000`.
 - Another application also uses port `5173` on the machine's LAN address. The control-center Vite process is specifically bound to IPv6 loopback (`::1:5173`), so Nginx must target that listener rather than the LAN listener.
+- `/etc/hosts` currently contains `127.0.0.1 damkeeper.top www.damkeeper.top`, which bypasses public DNS and Cloudflare when the domain is opened on this Mac.
 
 ## Chosen Design
 
@@ -33,7 +34,9 @@ Nginx will gain two locations in the existing `damkeeper.top` server block:
 - Exact `/control-center` requests return a permanent `308` redirect to `/control-center/`.
 - `/control-center/` requests proxy to the existing control-center Vite listener at `[::1]:5173` while preserving the complete request path.
 
-The existing exact `/cx-tools` redirect and `/cx-tools/` proxy locations will be removed. Requests under `/cx-tools/` will then follow Nginx's normal longest-prefix matching and fall through to the existing `/` default application. The `/` location itself remains unchanged. No Cloudflare settings, hostnames, DNS records, tunnel ingress rules, or listening ports change.
+The existing `/cx-tools/` and `/` locations remain unchanged. No Cloudflare settings, hostnames, DNS records, tunnel ingress rules, or listening ports change.
+
+The `damkeeper.top` and `www.damkeeper.top` loopback override will be removed from `/etc/hosts`. Other hosts entries, including the Cloudflare Tunnel edge-host overrides, remain unchanged. The macOS DNS cache will be refreshed after the edit.
 
 ## Client Path Handling
 
@@ -56,7 +59,7 @@ Access and error logging continue through the existing Nginx log files, whose st
 
 ## Failure Behavior
 
-- If the control-center Vite process is unavailable, only `/control-center/` returns an Nginx upstream error; the default `/` route remains unaffected.
+- If the control-center Vite process is unavailable, only `/control-center/` returns an Nginx upstream error; existing routes remain unaffected.
 - If Fastify is unavailable, Vite returns an API proxy failure while the UI route remains isolated from the other Nginx applications.
 - The redirect normalizes the no-trailing-slash URL so relative base-path behavior is deterministic.
 
@@ -68,9 +71,11 @@ Automated tests will first establish the required client base-path behavior and 
 2. The client production build verifies asset URLs are rooted under `/control-center/`.
 3. `nginx -t` validates the complete Nginx configuration before reload.
 4. Local requests through Nginx verify that `/control-center` redirects once, `/control-center/` returns HTML with status `200` without another redirect, and a static asset and API endpoint both succeed.
-5. Configuration inspection confirms no active route still references `127.0.0.1:6177`, and smoke checks confirm `/` still resolves through its original upstream.
-6. The Nginx reload occurs only after configuration validation succeeds.
+5. Smoke checks confirm `/cx-tools/` and `/` still resolve through their original upstreams.
+6. `/etc/hosts` inspection confirms neither domain is mapped to loopback, while its unrelated entries remain present.
+7. DNS resolution confirms `damkeeper.top` no longer resolves to `127.0.0.1` on this Mac.
+8. The Nginx reload occurs only after configuration validation succeeds.
 
 ## Rollback
 
-Before editing, save a dated backup of the existing Nginx gateway file. Rollback restores that backup (including the former `/cx-tools/` route), restores the client base-path changes, validates with `nginx -t`, and reloads Nginx. Cloudflare requires no rollback because it is not modified.
+Before editing, save dated backups of the existing Nginx gateway file and `/etc/hosts`. Rollback restores those backups, restores the client base-path changes, validates with `nginx -t`, reloads Nginx, and refreshes the macOS DNS cache. Cloudflare requires no rollback because it is not modified.
