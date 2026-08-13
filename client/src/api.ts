@@ -51,10 +51,10 @@ export type KiwiVmTrafficResponse =
     };
 
 export const api = {
-  getServices: () => fetch(apiPath('/services')).then(r => r.json()),
-  getEvents: () => fetch(apiPath('/events')).then(r => r.json()),
+  getServices: () => fetch(apiPath('/services', import.meta.env.BASE_URL)).then(r => r.json()),
+  getEvents: () => fetch(apiPath('/events', import.meta.env.BASE_URL)).then(r => r.json()),
   serviceAction: (id: string, action: string) =>
-    fetch(apiPath(`/services/${id}/action`), {
+    fetch(apiPath(`/services/${id}/action`, import.meta.env.BASE_URL), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action }),
@@ -62,24 +62,24 @@ export const api = {
   getServiceLogs: (id: string, file?: string) => {
     const q = new URLSearchParams({ lines: '40' });
     if (file) q.set('file', file);
-    return fetch(`${apiPath(`/services/${id}/logs`)}?${q}`).then(r => r.json());
+    return fetch(`${apiPath(`/services/${id}/logs`, import.meta.env.BASE_URL)}?${q}`).then(r => r.json());
   },
   getNetworkData: (range: string) =>
-    fetch(`${apiPath('/network/data')}?range=${range}`).then(r => r.json()),
+    fetch(`${apiPath('/network/data', import.meta.env.BASE_URL)}?range=${range}`).then(r => r.json()),
   probeNetwork: () =>
-    fetch(apiPath('/network/probe'), { method: 'POST' }).then(r => r.json()),
+    fetch(apiPath('/network/probe', import.meta.env.BASE_URL), { method: 'POST' }).then(r => r.json()),
   pingNetwork: () =>
-    fetch(apiPath('/network/ping')).then(r => r.json()) as Promise<Record<string, Record<string, { up: boolean; latencyMs: number; probedAt: number }>>>,
+    fetch(apiPath('/network/ping', import.meta.env.BASE_URL)).then(r => r.json()) as Promise<Record<string, Record<string, { up: boolean; latencyMs: number; probedAt: number }>>>,
   getNetworkProxy: () =>
-    fetch(apiPath('/network/proxy')).then(r => r.json()),
+    fetch(apiPath('/network/proxy', import.meta.env.BASE_URL)).then(r => r.json()),
   setNetworkProxy: (proxyUrl: string) =>
-    fetch(apiPath('/network/proxy'), {
+    fetch(apiPath('/network/proxy', import.meta.env.BASE_URL), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ proxyUrl }),
     }).then(r => r.json()),
   getClashStatus: () =>
-    fetch(apiPath('/network/clash')).then(r => r.json()) as Promise<ClashStatus>,
+    fetch(apiPath('/network/clash', import.meta.env.BASE_URL)).then(r => r.json()) as Promise<ClashStatus>,
   getKiwiVmTraffic: () =>
-    fetch(apiPath('/network/kiwivm-traffic')).then(r => r.json()) as Promise<KiwiVmTrafficResponse>,
+    fetch(apiPath('/network/kiwivm-traffic', import.meta.env.BASE_URL)).then(r => r.json()) as Promise<KiwiVmTrafficResponse>,
 };

@@ -1,23 +1,28 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import {
-  CONTROL_CENTER_BASE_PATH,
-  stripControlCenterBase,
-} from './src/control-center-paths.js';
+import { stripBasePath } from './src/control-center-paths.js';
 
 const apiTarget = 'http://localhost:9000';
 
-export default defineConfig({
-  base: CONTROL_CENTER_BASE_PATH,
-  plugins: [react()],
-  server: {
-    proxy: {
-      [`${CONTROL_CENTER_BASE_PATH}api`]: {
-        target: apiTarget,
-        rewrite: stripControlCenterBase,
-      },
-      '/api': apiTarget,
-    },
-  },
-  build: { outDir: 'dist' },
-});
+export function createViteConfig(publicBasePath = '/') {
+  const proxy = publicBasePath === '/'
+    ? { '/api': apiTarget }
+    : {
+        [`${publicBasePath}api`]: {
+          target: apiTarget,
+          rewrite: (path: string) => stripBasePath(path, publicBasePath),
+        },
+        '/api': apiTarget,
+      };
+
+  return defineConfig({
+    base: publicBasePath,
+    plugins: [react()],
+    server: { proxy },
+    build: { outDir: 'dist' },
+  });
+}
+
+export default createViteConfig(
+  process.env.CONTROL_CENTER_PUBLIC_BASE_PATH ?? '/',
+);
