@@ -60,7 +60,10 @@ export function buildBuckets(probes: NetProbe[], destId: string, sinceMs: number
   const buckets: BucketData[] = Array.from({ length: NET_BUCKETS }, (_, i) => {
     const bucketStart = sinceMs + i * bucketSize;
     const bucketEnd = bucketStart + bucketSize;
-    const inBucket = destProbes.filter(p => p.probed_at >= bucketStart && p.probed_at < bucketEnd);
+    const inBucket = destProbes.filter(p =>
+      p.probed_at >= bucketStart
+      && (p.probed_at < bucketEnd || i === NET_BUCKETS - 1 && p.probed_at <= nowMs)
+    );
 
     if (inBucket.length === 0) {
       return { up: false, latencyMs: 0, hasData: false, startAt: bucketStart, endAt: bucketEnd }; // 无数据，不是断线

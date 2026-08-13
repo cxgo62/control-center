@@ -9,6 +9,22 @@ test('registers the initial latency series in display order', () => {
     { id: 'chatgpt', label: 'ChatGPT', source: { kind: 'target', targetId: 'chatgpt', path: 'proxy' }, color: '#3b82f6', order: 30 },
     { id: 'google', label: 'Google', source: { kind: 'target', targetId: 'google', path: 'proxy' }, color: '#f59e0b', order: 40 },
   ]);
+  assert.deepEqual(validateNetLatencySeries(NET_LATENCY_SERIES), {
+    series: NET_LATENCY_SERIES,
+    warnings: [],
+  });
+});
+
+test('validator rejects unsafe series identifiers without retaining their contents', () => {
+  const result = validateNetLatencySeries([
+    { id: 'password=hunter2', label: 'Unsafe', source: { kind: 'target', targetId: 'google', path: 'proxy' }, color: '#123456', order: 1 },
+  ]);
+
+  assert.deepEqual(result, {
+    series: [],
+    warnings: [{ id: null, reason: 'invalid-id' }],
+  });
+  assert.equal(JSON.stringify(result).includes('hunter2'), false);
 });
 
 test('validator retains known group and target series while skipping invalid and duplicate entries', () => {

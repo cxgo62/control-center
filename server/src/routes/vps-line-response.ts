@@ -45,7 +45,10 @@ function createBuckets(samples: readonly VpsLineSampleRow[], sinceMs: number, no
   return Array.from({ length: BUCKET_COUNT }, (_, index) => {
     const startAt = sinceMs + index * bucketSize;
     const endAt = startAt + bucketSize;
-    const bucketSamples = samples.filter(sample => sample.probedAt >= startAt && sample.probedAt < endAt);
+    const bucketSamples = samples.filter(sample =>
+      sample.probedAt >= startAt
+      && (sample.probedAt < endAt || index === BUCKET_COUNT - 1 && sample.probedAt <= nowMs)
+    );
     if (!bucketSamples.length) {
       return {
         startAt,

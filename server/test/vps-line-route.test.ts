@@ -235,6 +235,30 @@ test('VPS current metrics keep zero attempts distinct from zero packet loss', as
   assert.equal(body.current.lossPercent, null);
 });
 
+test('VPS sample exactly at now is included in current, summary, and the final bucket', async t => {
+  const app = await buildApp({
+    discoveryState: { status: 'resolved', nodeName: 'private-config-name' },
+    samples: [sample({ probedAt: NOW, sent: 10, received: 9 })],
+  });
+  t.after(() => app.close());
+
+  const body = (await app.inject('/api/network/vps-line?range=1h')).json();
+  assert.equal(body.current.probedAt, NOW);
+  assert.deepEqual(body.rangeSummary, { hasData: true, sent: 10, lost: 1, lossPercent: 10 });
+  assert.deepEqual(body.buckets.at(-1), {
+    startAt: NOW - 75_000,
+    endAt: NOW,
+    hasData: true,
+    medianLatencyMs: 100,
+    p95LatencyMs: 120,
+    sent: 10,
+    lost: 1,
+    lossPercent: 10,
+    jitterMs: 5,
+    tcpState: 'up',
+  });
+});
+
 test('VPS route defaults invalid ranges to one hour and maps storage errors to a local safe response', async t => {
   const secret = 'sqlite failed at secret-host.example:1234 with password=hunter2';
   let queriedSince = 0;

@@ -44,7 +44,10 @@ function createLatencyBuckets(values: readonly TimedValue[], sinceMs: number, no
   return Array.from({ length: BUCKET_COUNT }, (_, index) => {
     const startAt = sinceMs + index * bucketSize;
     const endAt = startAt + bucketSize;
-    const samples = values.filter(value => value.timestamp >= startAt && value.timestamp < endAt);
+    const samples = values.filter(value =>
+      value.timestamp >= startAt
+      && (value.timestamp < endAt || index === BUCKET_COUNT - 1 && value.timestamp <= nowMs)
+    );
     const latencies = samples.flatMap(value => value.latencyMs !== null ? [value.latencyMs] : []);
     return {
       startAt,
@@ -57,8 +60,8 @@ function createLatencyBuckets(values: readonly TimedValue[], sinceMs: number, no
   });
 }
 
-function positiveLatency(value: number | null): number | null {
-  return value !== null && Number.isFinite(value) && value > 0 ? value : null;
+function validLatency(value: number | null): number | null {
+  return value !== null && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 export function buildLatencySeries(options: BuildLatencySeriesOptions): LatencySeriesResponse[] {
@@ -93,7 +96,7 @@ export function buildLatencySeries(options: BuildLatencySeriesOptions): LatencyS
         }
         values = stats.map(stat => ({
           timestamp: stat.computed_at,
-          latencyMs: positiveLatency(stat.avg_latency_ms),
+          latencyMs: validLatency(stat.avg_latency_ms),
         }));
       } else {
         let probes = probeCache.get(source.path);
@@ -106,7 +109,7 @@ export function buildLatencySeries(options: BuildLatencySeriesOptions): LatencyS
           .filter(probe => targetIds.has(probe.dest_id))
           .map(probe => ({
             timestamp: probe.probed_at,
-            latencyMs: probe.up === 1 ? positiveLatency(probe.latency_ms) : null,
+            latencyMs: probe.up === 1 ? validLatency(probe.latency_ms) : null,
           }));
       }
     } else {
@@ -120,7 +123,7 @@ export function buildLatencySeries(options: BuildLatencySeriesOptions): LatencyS
         .filter(probe => probe.dest_id === targetId)
         .map(probe => ({
           timestamp: probe.probed_at,
-          latencyMs: probe.up === 1 ? positiveLatency(probe.latency_ms) : null,
+          latencyMs: probe.up === 1 ? validLatency(probe.latency_ms) : null,
         }));
     }
 

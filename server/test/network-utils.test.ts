@@ -58,6 +58,36 @@ test('buildBuckets returns contiguous bucket time bounds for the requested range
   assert.equal(result.buckets[15].endAt, result.buckets[16].startAt);
 });
 
+test('network buckets and generic latency series include a probe exactly at nowMs in the final bucket', () => {
+  const nowMs = 4_800;
+  const probe = { id: 1, dest_id: 'google', path: 'proxy', up: 1, latency_ms: 42, probed_at: nowMs };
+  const destination = buildBuckets([probe], 'google', 0, nowMs);
+  const series = buildLatencySeries({
+    entries: [
+      { id: 'google', label: 'Google', source: { kind: 'target', targetId: 'google', path: 'proxy' }, color: '#123456', order: 1 },
+    ],
+    sinceMs: 0,
+    nowMs,
+    getGroupStats: () => [],
+    getNetProbes: () => [probe],
+    logWarning: () => {},
+  });
+
+  assert.deepEqual(destination.buckets.at(-1), {
+    startAt: 4_700,
+    endAt: 4_800,
+    up: true,
+    latencyMs: 42,
+    hasData: true,
+  });
+  assert.deepEqual(series[0].buckets.at(-1), {
+    startAt: 4_700,
+    endAt: 4_800,
+    latencyMs: 42,
+    hasData: true,
+  });
+});
+
 test('buildLatencySeries builds configured group and target sources into 48 chronological buckets', () => {
   const warnings: unknown[] = [];
   const groupCalls: string[] = [];
@@ -76,6 +106,7 @@ test('buildLatencySeries builds configured group and target sources into 48 chro
         { computed_at: 50, avg_latency_ms: 20 },
         { computed_at: 75, avg_latency_ms: 40 },
         { computed_at: 150, avg_latency_ms: null },
+        { computed_at: 250, avg_latency_ms: 0 },
       ];
     },
     getNetProbes: path => {
@@ -83,7 +114,8 @@ test('buildLatencySeries builds configured group and target sources into 48 chro
       return [
         { id: 1, dest_id: 'chatgpt', path, up: 1, latency_ms: 100, probed_at: 50 },
         { id: 2, dest_id: 'chatgpt', path, up: 0, latency_ms: null, probed_at: 150 },
-        { id: 3, dest_id: 'google', path, up: 1, latency_ms: 200, probed_at: 50 },
+        { id: 3, dest_id: 'chatgpt', path, up: 1, latency_ms: 0, probed_at: 250 },
+        { id: 4, dest_id: 'google', path, up: 1, latency_ms: 200, probed_at: 50 },
       ];
     },
     logWarning: warning => warnings.push(warning),
@@ -107,12 +139,12 @@ test('buildLatencySeries builds configured group and target sources into 48 chro
   assert.deepEqual(result[0].buckets.slice(0, 3), [
     { startAt: 0, endAt: 100, latencyMs: 30, hasData: true },
     { startAt: 100, endAt: 200, latencyMs: null, hasData: true },
-    { startAt: 200, endAt: 300, latencyMs: null, hasData: false },
+    { startAt: 200, endAt: 300, latencyMs: 0, hasData: true },
   ]);
   assert.deepEqual(result[1].buckets.slice(0, 3), [
     { startAt: 0, endAt: 100, latencyMs: 100, hasData: true },
     { startAt: 100, endAt: 200, latencyMs: null, hasData: true },
-    { startAt: 200, endAt: 300, latencyMs: null, hasData: false },
+    { startAt: 200, endAt: 300, latencyMs: 0, hasData: true },
   ]);
 });
 
@@ -160,6 +192,7 @@ test('buildLatencySeries skips invalid series with sanitized warnings', () => {
   const result = buildLatencySeries({
     entries: [
       { id: 'bad-color', label: secret, source: { kind: 'target', targetId: 'google', path: 'proxy' }, color: secret, order: 1 },
+      { id: 'password=hunter2', label: 'Unsafe ID', source: { kind: 'target', targetId: 'google', path: 'proxy' }, color: '#123456', order: 2 },
       { id: 'good', label: 'Good', source: { kind: 'target', targetId: 'google', path: 'proxy' }, color: '#654321', order: 3 },
     ],
     sinceMs: 0,
@@ -172,6 +205,8 @@ test('buildLatencySeries skips invalid series with sanitized warnings', () => {
   assert.deepEqual(result.map(series => series.id), ['good']);
   assert.deepEqual(warnings, [
     { code: 'NETWORK_LATENCY_SERIES_SKIPPED', seriesId: 'bad-color', reason: 'invalid-color' },
+    { code: 'NETWORK_LATENCY_SERIES_SKIPPED', seriesId: null, reason: 'invalid-id' },
   ]);
   assert.equal(JSON.stringify(warnings).includes(secret), false);
+  assert.equal(JSON.stringify(warnings).includes('hunter2'), false);
 });

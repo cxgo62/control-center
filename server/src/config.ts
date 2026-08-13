@@ -59,7 +59,7 @@ export type NetLatencySeries = {
 
 export type NetLatencySeriesWarning = {
   id: string | null;
-  reason: 'invalid-entry' | 'duplicate-id' | 'invalid-group' | 'unknown-target' | 'invalid-path' | 'invalid-color';
+  reason: 'invalid-entry' | 'invalid-id' | 'duplicate-id' | 'invalid-group' | 'unknown-target' | 'invalid-path' | 'invalid-color';
 };
 
 export const SERVICES: ServiceConfig[] = [
@@ -217,6 +217,10 @@ function isUsableColor(value: unknown): value is string {
   return typeof value === 'string' && /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value);
 }
 
+function isSafeSeriesId(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(value);
+}
+
 export function validateNetLatencySeries(entries: readonly unknown[]): { series: NetLatencySeries[]; warnings: NetLatencySeriesWarning[] } {
   const ids = new Set<string>();
   const targetIds = new Set(NET_TARGETS.map(target => target.id));
@@ -230,6 +234,10 @@ export function validateNetLatencySeries(entries: readonly unknown[]): { series:
     }
     const candidate = entry as Record<string, unknown>;
     const id = typeof candidate.id === 'string' ? candidate.id : null;
+    if (id !== null && !isSafeSeriesId(id)) {
+      warnings.push({ id: null, reason: 'invalid-id' });
+      continue;
+    }
     if (!id || typeof candidate.label !== 'string' || !candidate.label.trim() || typeof candidate.order !== 'number' || !Number.isFinite(candidate.order) || !candidate.source || typeof candidate.source !== 'object') {
       warnings.push({ id, reason: 'invalid-entry' });
       continue;
