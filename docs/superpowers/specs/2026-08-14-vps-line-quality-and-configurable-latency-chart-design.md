@@ -79,6 +79,8 @@ Add a focused SQLite table for aggregate VPS probe samples. Store no secrets and
 
 Each bucket contains its start and end timestamps, `hasData`, aggregate median latency, aggregate P95 latency, total sent and lost counts, packet-loss percentage, aggregate jitter, and TCP state. Bucket TCP state is `up` when every recorded attempt succeeded, `intermittent` when successes and failures are mixed, `down` when every recorded attempt failed, and `unknown` when no attempt exists. Missing buckets remain explicit missing data and are not represented as zero latency or zero loss.
 
+Bucket numeric reductions are deterministic: sum sent/received counts and derive loss from those totals; calculate bucket median latency as the received-count-weighted mean of the available per-round median RTT values; calculate bucket P95 as the maximum available per-round P95 value so short tail-latency spikes remain visible; and calculate bucket jitter as the successful-adjacent-pair-weighted mean of per-round jitter, where a round contributes `max(received - 1, 0)` pairs. A metric with no contributing value is `null`, not zero.
+
 The API uses safe local error codes/messages. It does not return the raw Clash entry, node address, port, parser error text, command output, or secrets.
 
 ## Quality classification
