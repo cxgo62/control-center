@@ -101,10 +101,22 @@ export function createVpsLineMonitor(dependencies: VpsLineMonitorDependencies): 
   let discoveryInterval: unknown;
   let debounceTimer: unknown;
   let discoveryPromise: Promise<void> | undefined;
+  let queuedDiscoveryReason: DiscoveryReason | undefined;
   let probePromise: Promise<void> | undefined;
   let consecutiveFailures = 0;
   let lastEarlyRediscoveryAt = Number.NEGATIVE_INFINITY;
   let endpointGeneration = 0;
+
+  const updateEndpoint = (nextEndpoint: PrivateNodeEndpoint | undefined): void => {
+    const unchanged = endpoint === undefined && nextEndpoint === undefined
+      || endpoint !== undefined
+        && nextEndpoint !== undefined
+        && endpoint.name === nextEndpoint.name
+        && endpoint.host === nextEndpoint.host
+        && endpoint.port === nextEndpoint.port;
+    if (!unchanged) endpointGeneration += 1;
+    endpoint = nextEndpoint;
+  };
 
   const handleWatcherError = (): void => {
     if (lifecycle !== 'running') return;
@@ -115,59 +127,69 @@ export function createVpsLineMonitor(dependencies: VpsLineMonitorDependencies): 
     }, 'VPS line config watch unavailable');
   };
 
+  const performDiscovery = async (reason: DiscoveryReason): Promise<void> => {
+    let content: string;
+    try {
+      content = await readConfig(dependencies.configPath);
+    } catch {
+      if (lifecycle !== 'running') return;
+      updateEndpoint(undefined);
+      discoveryState = {
+        status: 'unresolved',
+        nodeName: configuredNodeName,
+        code: 'CLASH_CONFIG_UNAVAILABLE',
+      };
+      logger.warn({
+        code: 'VPS_LINE_DISCOVERY_FAILED',
+        nodeName: configuredNodeName,
+        category: 'CLASH_CONFIG_UNAVAILABLE',
+        reason,
+      }, 'VPS line node discovery failed');
+      return;
+    }
+
+    if (lifecycle !== 'running') return;
+    const result = resolveNode(content, configuredNodeName);
+    if (!result.ok) {
+      updateEndpoint(undefined);
+      discoveryState = {
+        status: 'unresolved',
+        nodeName: configuredNodeName,
+        code: result.error.code,
+      };
+      logger.warn({
+        code: 'VPS_LINE_DISCOVERY_FAILED',
+        nodeName: configuredNodeName,
+        category: result.error.code,
+        reason,
+      }, 'VPS line node discovery failed');
+      return;
+    }
+
+    updateEndpoint(result.endpoint);
+    discoveryState = { status: 'resolved', nodeName: configuredNodeName };
+    logger.info({
+      code: 'VPS_LINE_DISCOVERY_RESOLVED',
+      nodeName: configuredNodeName,
+      reason,
+    }, 'VPS line node discovery completed');
+  };
+
   const discover = (reason: DiscoveryReason): Promise<void> => {
     if (lifecycle !== 'running') return Promise.resolve();
-    if (discoveryPromise) return discoveryPromise;
+    if (discoveryPromise) {
+      queuedDiscoveryReason = reason;
+      return discoveryPromise;
+    }
 
     const task = (async () => {
-      let content: string;
-      try {
-        content = await readConfig(dependencies.configPath);
-      } catch {
+      let nextReason: DiscoveryReason | undefined = reason;
+      while (nextReason && lifecycle === 'running') {
+        await performDiscovery(nextReason);
         if (lifecycle !== 'running') return;
-        endpointGeneration += 1;
-        endpoint = undefined;
-        discoveryState = {
-          status: 'unresolved',
-          nodeName: configuredNodeName,
-          code: 'CLASH_CONFIG_UNAVAILABLE',
-        };
-        logger.warn({
-          code: 'VPS_LINE_DISCOVERY_FAILED',
-          nodeName: configuredNodeName,
-          category: 'CLASH_CONFIG_UNAVAILABLE',
-          reason,
-        }, 'VPS line node discovery failed');
-        return;
+        nextReason = queuedDiscoveryReason;
+        queuedDiscoveryReason = undefined;
       }
-
-      if (lifecycle !== 'running') return;
-      const result = resolveNode(content, configuredNodeName);
-      if (!result.ok) {
-        endpointGeneration += 1;
-        endpoint = undefined;
-        discoveryState = {
-          status: 'unresolved',
-          nodeName: configuredNodeName,
-          code: result.error.code,
-        };
-        logger.warn({
-          code: 'VPS_LINE_DISCOVERY_FAILED',
-          nodeName: configuredNodeName,
-          category: result.error.code,
-          reason,
-        }, 'VPS line node discovery failed');
-        return;
-      }
-
-      endpointGeneration += 1;
-      endpoint = result.endpoint;
-      discoveryState = { status: 'resolved', nodeName: configuredNodeName };
-      logger.info({
-        code: 'VPS_LINE_DISCOVERY_RESOLVED',
-        nodeName: configuredNodeName,
-        reason,
-      }, 'VPS line node discovery completed');
     })();
 
     const wrappedTask = task.finally(() => {
@@ -309,6 +331,7 @@ export function createVpsLineMonitor(dependencies: VpsLineMonitorDependencies): 
   const stop = (): void => {
     if (lifecycle === 'stopped') return;
     lifecycle = 'stopped';
+    queuedDiscoveryReason = undefined;
     endpoint = undefined;
     if (probeInterval !== undefined) {
       cancelInterval(probeInterval);
