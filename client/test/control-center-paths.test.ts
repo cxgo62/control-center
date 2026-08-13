@@ -5,6 +5,7 @@ import {
   apiPath,
   stripControlCenterBase,
 } from '../src/control-center-paths.js';
+import viteConfig from '../vite.config.js';
 
 test('uses the control-center public base path', () => {
   assert.equal(CONTROL_CENTER_BASE_PATH, '/control-center/');
@@ -20,4 +21,10 @@ test('rewrites prefixed API requests for the existing Fastify routes', () => {
     stripControlCenterBase('/control-center/api/services?refresh=1'),
     '/api/services?refresh=1',
   );
+});
+
+test('configures Vite for the public base and both API entry paths', () => {
+  assert.equal(viteConfig.base, CONTROL_CENTER_BASE_PATH);
+  assert.ok(viteConfig.server?.proxy?.['/control-center/api']);
+  assert.ok(viteConfig.server?.proxy?.['/api']);
 });
