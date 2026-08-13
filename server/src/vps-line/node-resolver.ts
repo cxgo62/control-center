@@ -15,7 +15,12 @@ export type PrivateNodeResolution =
   | { ok: true; endpoint: PrivateNodeEndpoint }
   | { ok: false; error: { code: PrivateNodeResolutionErrorCode; message: string } };
 
-type ProxyEntry = Map<string, string>;
+type RelevantProxyKey = 'name' | 'server' | 'port';
+
+type ProxyEntry = {
+  fields: Partial<Record<RelevantProxyKey, string>>;
+  malformed: boolean;
+};
 
 const NODE_RESOLUTION_MESSAGE = 'Configured private node could not be resolved';
 
@@ -77,6 +82,20 @@ function parseMapping(line: string): [string, string] | null {
   return match ? [match[1], match[2]] : null;
 }
 
+function isRelevantProxyKey(key: string): key is RelevantProxyKey {
+  return key === 'name' || key === 'server' || key === 'port';
+}
+
+function retainRelevantField(entry: ProxyEntry, mapping: [string, string]): void {
+  const [key, value] = mapping;
+  if (!isRelevantProxyKey(key)) return;
+  if (Object.hasOwn(entry.fields, key)) {
+    entry.malformed = true;
+    return;
+  }
+  entry.fields[key] = value;
+}
+
 function parseProxyEntries(content: string): ProxyEntry[] | null {
   const lines = content.replace(/^\uFEFF/, '').split(/\r?\n/);
   const proxiesIndex = lines.findIndex(line => indentation(line) === 0 && /^proxies\s*:/.test(stripComment(line)));
@@ -89,7 +108,8 @@ function parseProxyEntries(content: string): ProxyEntry[] | null {
   const body: string[] = [];
   for (let index = proxiesIndex + 1; index < lines.length; index += 1) {
     const line = lines[index];
-    if (stripComment(line).trim() && indentation(line) === 0) break;
+    const significant = stripComment(line).trim();
+    if (significant && indentation(line) === 0 && !/^-\s+/.test(significant)) break;
     body.push(line);
   }
 
@@ -110,11 +130,11 @@ function parseProxyEntries(content: string): ProxyEntry[] | null {
   }
 
   return blocks.map(block => {
-    const entry = new Map<string, string>();
+    const entry: ProxyEntry = { fields: {}, malformed: false };
     const firstLine = block[0].replace(/^\s*-\s+/, '');
     const firstMapping = parseMapping(firstLine);
-    if (!firstMapping) return entry;
-    entry.set(firstMapping[0], firstMapping[1]);
+    if (!firstMapping) return { ...entry, malformed: true };
+    retainRelevantField(entry, firstMapping);
 
     const mappingLines = block.slice(1)
       .map(line => ({ line, mapping: parseMapping(line), indent: indentation(line) }))
@@ -124,9 +144,7 @@ function parseProxyEntries(content: string): ProxyEntry[] | null {
       null,
     );
     for (const candidate of mappingLines) {
-      if (candidate.indent === directIndent && !entry.has(candidate.mapping[0])) {
-        entry.set(candidate.mapping[0], candidate.mapping[1]);
-      }
+      if (candidate.indent === directIndent) retainRelevantField(entry, candidate.mapping);
     }
     return entry;
   });
@@ -137,16 +155,16 @@ export function resolvePrivateNode(content: string, configuredName: string): Pri
   if (!identity) return failure('PRIVATE_NODE_NAME_INVALID', 'Private node identity is invalid');
 
   const entries = parseProxyEntries(content);
-  if (!entries || entries.some(entry => !parseScalar(entry.get('name')))) {
+  if (!entries || entries.some(entry => entry.malformed || !parseScalar(entry.fields.name))) {
     return failure('CLASH_PROXIES_INVALID', 'Clash proxy configuration is invalid');
   }
 
-  const matches = entries.filter(entry => parseScalar(entry.get('name')) === identity);
+  const matches = entries.filter(entry => parseScalar(entry.fields.name) === identity);
   if (!matches.length) return failure('PRIVATE_NODE_NOT_FOUND');
   if (matches.length > 1) return failure('PRIVATE_NODE_AMBIGUOUS');
 
-  const host = parseScalar(matches[0].get('server'));
-  const portValue = parseScalar(matches[0].get('port'));
+  const host = parseScalar(matches[0].fields.server);
+  const portValue = parseScalar(matches[0].fields.port);
   const port = portValue !== null && /^\d+$/.test(portValue) ? Number(portValue) : Number.NaN;
   if (!host || /[\s\0-\x1F\x7F]/.test(host) || !Number.isInteger(port) || port < 1 || port > 65535) {
     return failure('PRIVATE_NODE_INVALID');

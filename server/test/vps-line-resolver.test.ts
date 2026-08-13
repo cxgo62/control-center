@@ -40,6 +40,30 @@ test('accepts address and port changes without changing the configured identity'
   assert.deepEqual(second, { ok: true, endpoint: { name: 'stable-name', host: '192.0.2.11', port: 2000 } });
 });
 
+test('supports generated Clash YAML with indentless proxy items and stops at the next top-level mapping', () => {
+  const config = `
+proxies:
+- name: "Private VPS"
+  type: vless
+  server: indentless.example.com
+  port: 8443
+  uuid: do-not-retain
+proxy-groups:
+- name: group-only-name
+  server: must-not-be-read.example.com
+  port: 443
+`;
+
+  assert.deepEqual(resolvePrivateNode(config, 'Private VPS'), {
+    ok: true,
+    endpoint: { name: 'Private VPS', host: 'indentless.example.com', port: 8443 },
+  });
+  assert.deepEqual(resolvePrivateNode(config, 'group-only-name'), {
+    ok: false,
+    error: { code: 'PRIVATE_NODE_NOT_FOUND', message: 'Configured private node could not be resolved' },
+  });
+});
+
 test('matches node names exactly rather than by substring', () => {
   const result = resolvePrivateNode(`
 proxies:
@@ -76,6 +100,48 @@ proxies:
     ok: false,
     error: { code: 'PRIVATE_NODE_AMBIGUOUS', message: 'Configured private node could not be resolved' },
   });
+});
+
+test('rejects duplicate relevant keys inside one proxy entry as malformed', () => {
+  const duplicateFields = [
+    '    name: target',
+    '    server: second.example.com',
+    '    port: 8443',
+  ];
+
+  for (const duplicateField of duplicateFields) {
+    const result = resolvePrivateNode(`
+proxies:
+  - name: target
+    server: first.example.com
+    port: 443
+${duplicateField}
+    password: never-return-this
+`, 'target');
+    assert.deepEqual(result, {
+      ok: false,
+      error: { code: 'CLASH_PROXIES_INVALID', message: 'Clash proxy configuration is invalid' },
+    });
+    assert.equal(JSON.stringify(result).includes('never-return-this'), false);
+    assert.equal(JSON.stringify(result).includes('example.com'), false);
+  }
+});
+
+test('ignores duplicate unrelated keys without retaining or returning their values', () => {
+  const result = resolvePrivateNode(`
+proxies:
+  - name: target
+    server: safe.example.com
+    port: 443
+    uuid: first-secret
+    uuid: second-secret
+`, 'target');
+
+  assert.deepEqual(result, {
+    ok: true,
+    endpoint: { name: 'target', host: 'safe.example.com', port: 443 },
+  });
+  assert.equal(JSON.stringify(result).includes('secret'), false);
 });
 
 test('rejects malformed matching nodes and never includes sensitive values in errors', () => {
