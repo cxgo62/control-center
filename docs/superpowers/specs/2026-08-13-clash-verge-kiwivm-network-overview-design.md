@@ -18,10 +18,24 @@ This change is limited to the existing Control Center network sidebar and its se
   - `mode`
   - `tunEnabled`
   - `tunStack`
+- Map `mixed-port` to `mixedPort`, `mode` to `mode`, `tun.enable` to `tunEnabled`, and `tun.stack` to `tunStack`. A missing or invalid required field produces the unavailable response rather than a partially fabricated status.
 - Expose the data through `GET /api/network/clash`.
 - The sidebar card is labelled `Clash Verge` and retains the current four-cell presentation for TUN mode, protocol stack, proxy port, and routing mode.
 - Remove the hard-coded FlClash version because it is stale and the current YAML file does not provide a reliable application version.
-- If the file cannot be read or parsed, return a safe unavailable response. Do not read or return proxies, controller secrets, subscription URLs, or the full configuration.
+- A successful response is:
+
+  ```ts
+  {
+    available: true;
+    mixedPort: number;
+    mode: string;
+    tunEnabled: boolean;
+    tunStack: string;
+  }
+  ```
+
+- If the file cannot be read or parsed, return HTTP 200 with `{ available: false, error: { code: 'CLASH_CONFIG_UNAVAILABLE', message: 'Clash Verge 配置不可用' } }`. An unavailable status card is optional to render; it must never break the rest of the sidebar.
+- Do not read or return proxies, controller secrets, subscription URLs, or the full configuration.
 
 ## KiwiVM credentials
 
@@ -46,6 +60,8 @@ This change is limited to the existing Control Center network sidebar and its se
 - Use a finite request timeout of 20 seconds.
 - Validate the HTTP status, JSON syntax, KiwiVM `error` field, and every consumed value.
 - Cache a successful normalized result in memory for five minutes. Do not persist the response. Failed requests are not retained in the success cache.
+- The cache TTL begins when a successful upstream response finishes normalization. A hit on a completed cache entry returns `cached: true`; the fresh request that populated it returns `cached: false`.
+- Concurrent requests during a cold cache or immediately after expiry share one in-flight promise, so only one upstream request is made. All callers awaiting that fresh request receive `cached: false`.
 - The route never exposes the raw KiwiVM response.
 - Important fetch failures are logged with the existing Fastify structured logger. Log records contain Fastify/Pino timestamps and a sanitized error code/message, never credentials or the raw response.
 
@@ -66,6 +82,25 @@ usage_percent   = used_bytes / total_bytes * 100
 - The API payload includes `monthlyDataMultiplier` and a calculation-method identifier so a multiplier greater than one can be visibly marked for later calibration against the KiwiVM panel.
 - This initial implementation uses candidate A from the handoff document. It must not describe the result as independently verified billing data until the user supplies credentials and compares it to KiwiVM.
 
+## Raw KiwiVM field mapping
+
+The server consumes and validates only these raw `getServiceInfo` fields:
+
+| Raw field | Accepted value | Normalized use |
+| --- | --- | --- |
+| `error` | finite number; `0` means success | API success/failure gate |
+| `message` | optional string | never relayed verbatim; used only to identify that an API error occurred |
+| `hostname` | non-empty string | `hostname` |
+| `node_location` | non-empty string | `location` |
+| `plan_monthly_data` | finite number greater than zero | `totalBytes` |
+| `data_counter` | finite non-negative number | candidate-A used-byte calculation |
+| `monthly_data_multiplier` | finite number greater than zero | candidate-A used-byte calculation and calibration note |
+| `data_next_reset` | finite Unix timestamp in seconds greater than zero | multiplied by 1,000 to produce `nextResetAt` in Unix milliseconds |
+| `suspended` | boolean or numeric `0`/`1` | normalized boolean |
+| `policy_violation` | boolean or numeric `0`/`1` | normalized boolean |
+
+Numeric strings are rejected rather than coerced. Unknown fields are ignored. The server never forwards a sanitized or unsanitized raw fixture to the client. A representative test fixture may contain only these fields and must use dummy values.
+
 ## Normalized KiwiVM response
 
 When configured and successful, the browser receives only this allowlisted information:
@@ -85,14 +120,40 @@ When configured and successful, the browser receives only this allowlisted infor
   suspended: boolean;
   policyViolation: boolean;
   severity: 'normal' | 'notice' | 'warning' | 'critical';
-  fetchedAt: number;
+  fetchedAt: number; // Unix milliseconds
   cached: boolean;
 }
 ```
 
+`nextResetAt` is also Unix milliseconds. Both timestamps are therefore directly consumable by JavaScript `Date`.
+
 `severity` is calculated from usage percentage: below 70% is normal, 70%–84.99% is notice, 85%–94.99% is warning, and 95% or higher is critical. Suspension and policy violations are separate prominent warnings and are not hidden by the traffic severity.
 
-When the credential file is absent or still contains placeholders, the route returns a non-secret `configured: false` response rather than treating setup as an operational outage. Other failures return an appropriate non-2xx status with a stable sanitized error code and safe message.
+When the credential file is absent, unreadable, incomplete, or still contains placeholder values, the route returns HTTP 200 with:
+
+```ts
+{ configured: false, reason: 'credentials_missing' }
+```
+
+Other failures use this response shape:
+
+```ts
+{
+  configured: true;
+  error: {
+    code:
+      | 'KIWIVM_TIMEOUT'
+      | 'KIWIVM_NETWORK_ERROR'
+      | 'KIWIVM_UPSTREAM_HTTP'
+      | 'KIWIVM_INVALID_JSON'
+      | 'KIWIVM_API_ERROR'
+      | 'KIWIVM_INVALID_DATA';
+    message: string;
+  };
+}
+```
+
+`KIWIVM_TIMEOUT` returns HTTP 504. DNS failures, refused/reset connections, and other non-timeout fetch rejections map to `KIWIVM_NETWORK_ERROR` with HTTP 502. The remaining four codes also return HTTP 502. Messages are locally defined generic Chinese messages; KiwiVM's raw `message` value is never relayed or logged. The client treats any non-2xx payload matching this contract as a card-local error state.
 
 ## Sidebar presentation
 
