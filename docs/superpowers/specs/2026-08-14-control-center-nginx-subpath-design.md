@@ -70,11 +70,11 @@ Automated tests will first establish the required client base-path behavior and 
 1. Client tests verify that API URLs are rooted under `/control-center/api/`.
 2. The client production build verifies asset URLs are rooted under `/control-center/`.
 3. `nginx -t` validates the complete Nginx configuration before reload.
-4. Local requests through Nginx verify that `/control-center` redirects once, `/control-center/` returns HTML with status `200` without another redirect, and a static asset and API endpoint both succeed.
-5. Smoke checks confirm `/cx-tools/` and `/` still resolve through their original upstreams.
-6. `/etc/hosts` inspection confirms neither domain is mapped to loopback, while its unrelated entries remain present.
-7. DNS resolution confirms `damkeeper.top` no longer resolves to `127.0.0.1` on this Mac.
-8. The Nginx reload occurs only after configuration validation succeeds.
+4. Nginx reloads immediately after configuration validation succeeds.
+5. Local requests through Nginx verify that `/control-center` redirects once, `/control-center/` returns HTML with status `200` without another redirect, and a static asset and API endpoint both succeed.
+6. Smoke checks confirm `/cx-tools/` and `/` still resolve through their original upstreams.
+7. `/etc/hosts` inspection confirms neither domain is mapped to loopback, while its unrelated entries remain present.
+8. DNS resolution confirms `damkeeper.top` no longer resolves to `127.0.0.1` on this Mac.
 
 ## Rollback
 
