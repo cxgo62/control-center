@@ -1,5 +1,5 @@
 import React from 'react';
-import type { NetworkData, NetDest, NetBucket, NetworkRange, VpsLineResponse } from '../types.js';
+import type { NetDest, NetBucket, NetworkRange, VpsLineResponse } from '../types.js';
 import { api, type ClashStatus, type KiwiVmTrafficResponse, type KiwiVmTrafficSuccess } from '../api.js';
 import { StatusDot, ToastStack, useToast, fmtAgo } from './Shared.js';
 import { cardHoverPosition, formatBucketTooltip } from './uptime-bar-tooltip.js';
@@ -7,6 +7,13 @@ import { formatShanghaiResetTime, formatTrafficBytes, formatUsagePercent } from 
 import { averageLatencyForSeries, shouldCommitLatestRequest, shouldCommitRangeResponse } from './network-chart-utils.js';
 import { GenericLatencyChart, NetworkStatusBar, VpsLineCard } from './NetworkQualityCards.js';
 import { useElementWidth } from './use-element-width.js';
+import {
+  beginNetworkDataRequest,
+  completeNetworkDataRequest,
+  failNetworkDataRequest,
+  initialNetworkDataState,
+  networkDataStatusMessage,
+} from './network-data-state.js';
 
 const NET_RANGES = [
   { key: '1h',  label: '1 小时',  ticks: ['-60分', '-45分', '-30分', '-15分', '现在'] },
@@ -648,9 +655,8 @@ type PingResult = Record<string, Record<string, { up: boolean; latencyMs: number
 // ---- Main NetworkPage ----
 export function NetworkPage() {
   const [range, setRange] = React.useState<NetworkRange>('1h');
-  const [data, setData] = React.useState<NetworkData | null>(null);
-  const [dataLoading, setDataLoading] = React.useState(true);
-  const [dataError, setDataError] = React.useState<string | null>(null);
+  const [networkDataState, setNetworkDataState] = React.useState(initialNetworkDataState);
+  const { data, dataRange, error: dataError } = networkDataState;
   const [vpsLine, setVpsLine] = React.useState<VpsLineResponse | null>(null);
   const [ping, setPing] = React.useState<PingResult | null>(null); // 实时探测结果（不入库）
   const [probing, setProbing] = React.useState(false);
@@ -665,21 +671,15 @@ export function NetworkPage() {
   const fetchData = React.useCallback(async (r: NetworkRange) => {
     if (r !== selectedRangeRef.current) return;
     const requestId = ++dataRequestIdRef.current;
-    setDataLoading(true);
-    setDataError(null);
+    setNetworkDataState(beginNetworkDataRequest);
     try {
       const result = await api.getNetworkData(r);
       if (shouldCommitRangeResponse(r, selectedRangeRef.current, requestId, dataRequestIdRef.current)) {
-        setData(result);
-        setDataError(null);
+        setNetworkDataState(state => completeNetworkDataRequest(state, result, r));
       }
     } catch {
       if (shouldCommitRangeResponse(r, selectedRangeRef.current, requestId, dataRequestIdRef.current)) {
-        setDataError('网络数据更新失败');
-      }
-    } finally {
-      if (shouldCommitRangeResponse(r, selectedRangeRef.current, requestId, dataRequestIdRef.current)) {
-        setDataLoading(false);
+        setNetworkDataState(state => failNetworkDataRequest(state, '网络数据更新失败'));
       }
     }
   }, []);
@@ -773,7 +773,7 @@ export function NetworkPage() {
     }
   };
 
-  const rangeInfo = NET_RANGES.find(r => r.key === range) ?? NET_RANGES[0];
+  const dataRangeInfo = NET_RANGES.find(r => r.key === dataRange) ?? NET_RANGES[0];
   const narrowContent = contentWidth < 760;
 
   // Empty state / loading
@@ -872,13 +872,14 @@ export function NetworkPage() {
           overall={overall} online={onN} total={allT.length}
           domesticAverage={dAvg} internationalAverage={pAvg}
           probedAt={data.probedAt} range={range} onRangeChange={setRange}
-          loading={dataLoading} error={dataError} onRetry={() => fetchData(range)}
+          statusMessage={networkDataStatusMessage(networkDataState, range)}
+          error={dataError !== null} onRetry={() => fetchData(range)}
         />
 
         <NetRegionCard
           title="国内连通性" sub="DOMESTIC"
           accent="#3fb950" path="direct"
-          targets={domestic} ticks={rangeInfo.ticks}
+          targets={domestic} ticks={dataRangeInfo.ticks}
         />
 
         <VpsLineCard response={vpsLine} />
@@ -886,7 +887,7 @@ export function NetworkPage() {
         <NetRegionCard
           title="国际连通性" sub="INTERNATIONAL"
           accent="#9b8cfa" path="proxy"
-          targets={international} ticks={rangeInfo.ticks}
+          targets={international} ticks={dataRangeInfo.ticks}
         />
 
         <GenericLatencyChart series={data.latencySeries} />

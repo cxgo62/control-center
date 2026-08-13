@@ -75,7 +75,7 @@ function TooltipShell({ left, children, width = 250 }: { left: number; children:
 
 export function NetworkStatusBar({
   overall, online, total, domesticAverage, internationalAverage, probedAt, range, onRangeChange,
-  loading, error, onRetry,
+  statusMessage, error, onRetry,
 }: {
   overall: number;
   online: number;
@@ -85,8 +85,8 @@ export function NetworkStatusBar({
   probedAt: number;
   range: NetworkRange;
   onRangeChange: (range: NetworkRange) => void;
-  loading: boolean;
-  error: string | null;
+  statusMessage: string;
+  error: boolean;
   onRetry: () => void;
 }) {
   const metrics = [
@@ -109,13 +109,10 @@ export function NetworkStatusBar({
       <span style={{ fontSize: 9.5, color: '#5d6673', fontFamily: MONO, whiteSpace: 'nowrap' }}>
         探测于 {fmtAgo(probedAt)}
       </span>
-      {error ? (
-        <button type="button" onClick={onRetry} style={{ border: 0, padding: 0, background: 'transparent', color: '#d9a531', fontSize: 9.5, cursor: 'pointer', fontFamily: 'inherit' }}>
-          {error}，显示上次数据 · 重试
-        </button>
-      ) : (
-        <span role="status" aria-live="polite" style={{ color: '#5d6673', fontSize: 9.5 }}>{loading ? '正在更新…' : ''}</span>
-      )}
+      {statusMessage && <span role={error ? 'alert' : 'status'} aria-live="polite" style={{ color: error ? '#d9a531' : '#5d6673', fontSize: 9.5 }}>
+        {statusMessage}
+        {error && <button type="button" onClick={onRetry} style={{ border: 0, padding: 0, marginLeft: 5, background: 'transparent', color: '#d9a531', fontSize: 9.5, cursor: 'pointer', fontFamily: 'inherit' }}>重试</button>}
+      </span>}
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 2, padding: 2, borderRadius: 8, flex: 'none', background: '#0c1016', border: '1px solid rgba(255,255,255,.08)' }}>
         {RANGE_OPTIONS.map(option => (
           <button key={option.key} aria-pressed={range === option.key} onClick={() => onRangeChange(option.key)} style={{

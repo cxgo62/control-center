@@ -59,7 +59,20 @@ test('charts support pointer and keyboard exploration with accessible live detai
 test('range controls expose selection and refreshes retain the previous network payload', () => {
   assert.match(cardsSource, /aria-pressed=\{range === option\.key\}/);
   assert.doesNotMatch(source, /setData\(null\)/);
-  assert.match(source, /dataLoading/);
+  assert.match(source, /networkDataState/);
   assert.match(source, /dataError/);
-  assert.match(cardsSource, /显示上次数据/);
+  assert.match(cardsSource, /statusMessage/);
+});
+
+test('retained regional axes use committed data provenance, not the requested range', () => {
+  assert.match(source, /dataRangeInfo/);
+  assert.match(source, /ticks=\{dataRangeInfo\.ticks\}/);
+  assert.doesNotMatch(source, /ticks=\{rangeInfo\.ticks\}/);
+  assert.match(source, /setNetworkDataState\(state => completeNetworkDataRequest/);
+});
+
+test('background refresh status is announced while retry stays interactive', () => {
+  assert.match(cardsSource, /role=\{error \? 'alert' : 'status'\}/);
+  assert.match(cardsSource, /aria-live="polite"/);
+  assert.match(cardsSource, /onClick=\{onRetry\}/);
 });
