@@ -13,11 +13,14 @@ import {
 
 class FakePingProcess extends EventEmitter implements PingProcess {
   stdout = new EventEmitter();
-  killed = false;
+  killSignals: Array<NodeJS.Signals | undefined> = [];
+  killResult = true;
+  onKill?: (signal: NodeJS.Signals | undefined) => void;
 
-  kill(): boolean {
-    this.killed = true;
-    return true;
+  kill(signal?: NodeJS.Signals): boolean {
+    this.killSignals.push(signal);
+    this.onKill?.(signal);
+    return this.killResult;
   }
 }
 
@@ -48,6 +51,33 @@ round-trip min/avg/max/stddev = 10.250/11.375/12.500/1.125 ms
 `);
 
   assert.deepEqual(result, { sent: 10, received: 2, rtts: [12.5, 10.25], usable: true });
+});
+
+test('parses all ten RTTs from a complete macOS ping round', () => {
+  const result = parsePingOutput(`
+PING private.example.com (192.0.2.25): 56 data bytes
+64 bytes from 192.0.2.25: icmp_seq=0 ttl=51 time=10.125 ms
+64 bytes from 192.0.2.25: icmp_seq=1 ttl=51 time=11.250 ms
+64 bytes from 192.0.2.25: icmp_seq=2 ttl=51 time=12.375 ms
+64 bytes from 192.0.2.25: icmp_seq=3 ttl=51 time=13.500 ms
+64 bytes from 192.0.2.25: icmp_seq=4 ttl=51 time=14.625 ms
+64 bytes from 192.0.2.25: icmp_seq=5 ttl=51 time=15.750 ms
+64 bytes from 192.0.2.25: icmp_seq=6 ttl=51 time=16.875 ms
+64 bytes from 192.0.2.25: icmp_seq=7 ttl=51 time=18.000 ms
+64 bytes from 192.0.2.25: icmp_seq=8 ttl=51 time=19.125 ms
+64 bytes from 192.0.2.25: icmp_seq=9 ttl=51 time=20.250 ms
+
+--- private.example.com ping statistics ---
+10 packets transmitted, 10 packets received, 0.0% packet loss
+round-trip min/avg/max/stddev = 10.125/15.188/20.250/3.231 ms
+`);
+
+  assert.deepEqual(result, {
+    sent: 10,
+    received: 10,
+    rtts: [10.125, 11.25, 12.375, 13.5, 14.625, 15.75, 16.875, 18, 19.125, 20.25],
+    usable: true,
+  });
 });
 
 test('parses reasonable Linux and Windows-style packet summaries', () => {
@@ -92,26 +122,81 @@ test('spawns a fixed ping command without a shell and keeps a hostile host in on
   });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].command, '/sbin/ping');
-  assert.deepEqual(calls[0].args, ['-c', '10', '-W', '2000', host]);
+  assert.deepEqual(calls[0].args, ['-c', '10', '-W', '2000', '--', host]);
   assert.equal(calls[0].args.filter(argument => argument === host).length, 1);
   assert.equal(calls[0].options.shell, false);
 });
 
-test('terminates an overdue ping and resolves a sanitized timeout result', async () => {
+test('keeps lifecycle listeners after kill false and a post-timeout error until the child closes', async () => {
   const child = new FakePingProcess();
-  const result = await runIcmpProbe('private.example.com', {
-    timeoutMs: 5,
+  child.killResult = false;
+  let resolved = false;
+  const resultPromise = runIcmpProbe('private.example.com', {
+    timeoutMs: 2,
+    terminationGraceMs: 100,
+    finalizationGraceMs: 100,
     spawn: () => child,
   });
+  void resultPromise.then(() => { resolved = true; });
+
+  await new Promise(resolve => setTimeout(resolve, 15));
+  assert.deepEqual(child.killSignals, ['SIGTERM']);
+  assert.equal(resolved, false);
+  assert.equal(child.listenerCount('close'), 1);
+  assert.equal(child.listenerCount('error'), 1);
+  assert.equal(child.stdout.listenerCount('data'), 1);
+
+  child.emit('error', new Error('kill reported false'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(resolved, false);
+  assert.equal(child.listenerCount('close'), 1);
+
+  child.emit('close', null, 'SIGTERM');
+  const result = await resultPromise;
 
   assert.deepEqual(result, {
     sent: 10, received: 0, rtts: [], usable: false, timedOut: true,
   });
-  assert.equal(child.killed, true);
   assert.equal(child.listenerCount('close'), 0);
   assert.equal(child.listenerCount('error'), 0);
   assert.equal(child.stdout.listenerCount('data'), 0);
   assert.equal(JSON.stringify(result).includes('private.example.com'), false);
+});
+
+test('escalates an ignored SIGTERM to SIGKILL and waits for close', async () => {
+  const child = new FakePingProcess();
+  child.onKill = signal => {
+    if (signal === 'SIGKILL') queueMicrotask(() => child.emit('close', null, 'SIGKILL'));
+  };
+
+  const result = await runIcmpProbe('private.example.com', {
+    timeoutMs: 2,
+    terminationGraceMs: 3,
+    finalizationGraceMs: 20,
+    spawn: () => child,
+  });
+
+  assert.deepEqual(child.killSignals, ['SIGTERM', 'SIGKILL']);
+  assert.equal(result.timedOut, true);
+  assert.equal(child.eventNames().length, 0);
+  assert.equal(child.stdout.eventNames().length, 0);
+});
+
+test('uses a final bounded fallback without leaking listeners when both kills fail and no close arrives', async () => {
+  const child = new FakePingProcess();
+  child.killResult = false;
+
+  const result = await runIcmpProbe('private.example.com', {
+    timeoutMs: 2,
+    terminationGraceMs: 3,
+    finalizationGraceMs: 3,
+    spawn: () => child,
+  });
+
+  assert.deepEqual(child.killSignals, ['SIGTERM', 'SIGKILL']);
+  assert.equal(result.timedOut, true);
+  assert.equal(child.eventNames().length, 0);
+  assert.equal(child.stdout.eventNames().length, 0);
 });
 
 test('maps ping spawn failures to a safe result rather than throwing endpoint details', async () => {

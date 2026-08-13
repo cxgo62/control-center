@@ -1,3 +1,5 @@
+import { isIP } from 'node:net';
+
 export type PrivateNodeEndpoint = {
   name: string;
   host: string;
@@ -96,14 +98,29 @@ function retainRelevantField(entry: ProxyEntry, mapping: [string, string]): void
   entry.fields[key] = value;
 }
 
+function isSafeProbeHost(host: string): boolean {
+  const ipVersion = isIP(host);
+  if (ipVersion !== 0) return ipVersion === 4;
+  if (host.length > 253 || /^[0-9.]+$/.test(host)) return false;
+  return host.split('.').every(label => (
+    label.length > 0
+    && label.length <= 63
+    && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label)
+  ));
+}
+
 function parseProxyEntries(content: string): ProxyEntry[] | null {
   const lines = content.replace(/^\uFEFF/, '').split(/\r?\n/);
-  const proxiesIndex = lines.findIndex(line => indentation(line) === 0 && /^proxies\s*:/.test(stripComment(line)));
-  if (proxiesIndex < 0) return null;
+  const proxiesIndexes = lines.flatMap((line, index) => (
+    indentation(line) === 0 && /^proxies\s*:/.test(stripComment(line)) ? [index] : []
+  ));
+  if (proxiesIndexes.length !== 1) return null;
+  const proxiesIndex = proxiesIndexes[0];
   const header = stripComment(lines[proxiesIndex]).match(/^proxies\s*:\s*(.*)$/);
   if (!header) return null;
-  if (header[1] === '[]') return [];
-  if (header[1] !== '') return null;
+  const headerValue = header[1].trim();
+  if (headerValue === '[]') return [];
+  if (headerValue !== '') return null;
 
   const body: string[] = [];
   for (let index = proxiesIndex + 1; index < lines.length; index += 1) {
@@ -166,7 +183,7 @@ export function resolvePrivateNode(content: string, configuredName: string): Pri
   const host = parseScalar(matches[0].fields.server);
   const portValue = parseScalar(matches[0].fields.port);
   const port = portValue !== null && /^\d+$/.test(portValue) ? Number(portValue) : Number.NaN;
-  if (!host || /[\s\0-\x1F\x7F]/.test(host) || !Number.isInteger(port) || port < 1 || port > 65535) {
+  if (!host || !isSafeProbeHost(host) || !Number.isInteger(port) || port < 1 || port > 65535) {
     return failure('PRIVATE_NODE_INVALID');
   }
 

@@ -40,6 +40,35 @@ test('accepts address and port changes without changing the configured identity'
   assert.deepEqual(second, { ok: true, endpoint: { name: 'stable-name', host: '192.0.2.11', port: 2000 } });
 });
 
+test('accepts safe DNS names and IPv4 literals as proxy hosts', () => {
+  for (const host of ['node-1.private.example.com', 'localhost', '192.0.2.25']) {
+    assert.deepEqual(resolvePrivateNode(`proxies:\n  - name: target\n    server: ${host}\n    port: 443\n`, 'target'), {
+      ok: true,
+      endpoint: { name: 'target', host, port: 443 },
+    });
+  }
+});
+
+test('rejects unsafe or unsupported proxy host forms', () => {
+  const invalidHosts = [
+    '-f',
+    'https://private.example.com',
+    'private.example.com/path',
+    'private host.example.com',
+    '2001:db8::1',
+    '999.999.999.999',
+  ];
+
+  for (const host of invalidHosts) {
+    const result = resolvePrivateNode(`proxies:\n  - name: target\n    server: "${host}"\n    port: 443\n`, 'target');
+    assert.deepEqual(result, {
+      ok: false,
+      error: { code: 'PRIVATE_NODE_INVALID', message: 'Configured private node could not be resolved' },
+    });
+    assert.equal(JSON.stringify(result).includes(host), false);
+  }
+});
+
 test('supports generated Clash YAML with indentless proxy items and stops at the next top-level mapping', () => {
   const config = `
 proxies:
@@ -82,6 +111,28 @@ test('treats an empty top-level proxies list as a valid list with no matching no
   assert.deepEqual(resolvePrivateNode('proxies: []\n', 'private-vps'), {
     ok: false,
     error: { code: 'PRIVATE_NODE_NOT_FOUND', message: 'Configured private node could not be resolved' },
+  });
+  assert.deepEqual(resolvePrivateNode('proxies: [] # generated empty list\n', 'private-vps'), {
+    ok: false,
+    error: { code: 'PRIVATE_NODE_NOT_FOUND', message: 'Configured private node could not be resolved' },
+  });
+});
+
+test('rejects duplicate top-level proxies definitions', () => {
+  const result = resolvePrivateNode(`
+proxies:
+  - name: target
+    server: first.example.com
+    port: 443
+proxies:
+  - name: target
+    server: second.example.com
+    port: 8443
+`, 'target');
+
+  assert.deepEqual(result, {
+    ok: false,
+    error: { code: 'CLASH_PROXIES_INVALID', message: 'Clash proxy configuration is invalid' },
   });
 });
 

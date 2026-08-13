@@ -5,6 +5,8 @@ import { calculateRoundMetrics, type VpsLineSampleMetrics } from './metrics.js';
 
 const ICMP_REQUEST_COUNT = 10;
 const DEFAULT_ICMP_TIMEOUT_MS = 15_000;
+const DEFAULT_TERMINATION_GRACE_MS = 1_000;
+const DEFAULT_FINALIZATION_GRACE_MS = 1_000;
 const DEFAULT_TCP_TIMEOUT_MS = 5_000;
 const MAX_PING_OUTPUT_BYTES = 256 * 1024;
 
@@ -79,13 +81,20 @@ export function parsePingOutput(output: string): ParsedPingOutput {
 
 export async function runIcmpProbe(
   host: string,
-  options: { spawn?: SpawnPing; timeoutMs?: number } = {},
+  options: {
+    spawn?: SpawnPing;
+    timeoutMs?: number;
+    terminationGraceMs?: number;
+    finalizationGraceMs?: number;
+  } = {},
 ): Promise<IcmpProbeResult> {
   const spawn = options.spawn ?? defaultSpawn;
   const timeoutMs = options.timeoutMs ?? DEFAULT_ICMP_TIMEOUT_MS;
+  const terminationGraceMs = options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS;
+  const finalizationGraceMs = options.finalizationGraceMs ?? DEFAULT_FINALIZATION_GRACE_MS;
   let child: PingProcess;
   try {
-    child = spawn('/sbin/ping', ['-c', String(ICMP_REQUEST_COUNT), '-W', '2000', host], {
+    child = spawn('/sbin/ping', ['-c', String(ICMP_REQUEST_COUNT), '-W', '2000', '--', host], {
       shell: false,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
@@ -97,6 +106,9 @@ export async function runIcmpProbe(
     let output = '';
     let settled = false;
     let timedOut = false;
+    let probeTimer: ReturnType<typeof setTimeout> | undefined;
+    let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+    let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
 
     const appendOutput = (chunk: unknown) => {
       if (output.length >= MAX_PING_OUTPUT_BYTES) return;
@@ -104,7 +116,9 @@ export async function runIcmpProbe(
       output += text.slice(0, MAX_PING_OUTPUT_BYTES - output.length);
     };
     const cleanup = () => {
-      clearTimeout(timer);
+      if (probeTimer) clearTimeout(probeTimer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+      if (fallbackTimer) clearTimeout(fallbackTimer);
       child.stdout?.off('data', appendOutput);
       child.off('close', handleClose);
       child.off('error', handleError);
@@ -116,19 +130,31 @@ export async function runIcmpProbe(
       resolve({ ...parsePingOutput(output), timedOut });
     };
     const handleClose = () => finish();
-    const handleError = () => finish();
-    const timer = setTimeout(() => {
-      timedOut = true;
+    const handleError = () => {
+      if (!timedOut) finish();
+    };
+    const signalChild = (signal: NodeJS.Signals) => {
       try {
-        child.kill('SIGTERM');
-      } finally {
-        finish();
+        child.kill(signal);
+      } catch {
+        // The bounded fallback still guarantees settlement and cleanup.
       }
-    }, Math.max(1, timeoutMs));
+    };
+    const handleTimeout = () => {
+      timedOut = true;
+      signalChild('SIGTERM');
+      if (settled) return;
+      forceKillTimer = setTimeout(() => {
+        signalChild('SIGKILL');
+        if (settled) return;
+        fallbackTimer = setTimeout(finish, Math.max(1, finalizationGraceMs));
+      }, Math.max(1, terminationGraceMs));
+    };
 
     child.stdout?.on('data', appendOutput);
     child.once('close', handleClose);
-    child.once('error', handleError);
+    child.on('error', handleError);
+    probeTimer = setTimeout(handleTimeout, Math.max(1, timeoutMs));
   });
 }
 
