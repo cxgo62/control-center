@@ -252,6 +252,37 @@ test('directory watcher ignores events for unrelated files', async () => {
   assert.equal(scheduler.handles.some(handle => handle.active && handle.kind === 'timeout'), false);
 });
 
+test('directory watcher conservatively debounces an event with an unknown filename', async () => {
+  const scheduler = new FakeScheduler();
+  let watchListener: WatchListener | undefined;
+  let reads = 0;
+  const monitor = monitorFactory()({
+    configuredNodeName: 'Private VPS',
+    configPath: '/private/clash-verge.yaml',
+    readConfig: async () => {
+      reads += 1;
+      return 'proxies:\n  - name: Private VPS\n    server: safe.example.com\n    port: 443\n';
+    },
+    watchConfig: (_directoryPath: string, listener: WatchListener) => {
+      watchListener = listener;
+      return { close() {} };
+    },
+    runProbe: async () => successfulSample(),
+    insertSample: () => {},
+    logger: createLogger([]),
+    ...scheduler,
+  });
+
+  await monitor.start();
+  watchListener?.('rename', null);
+
+  assert.equal(reads, 1);
+  assert.equal(scheduler.handles.filter(handle => handle.active && handle.kind === 'timeout').length, 1);
+  scheduler.fireLatestTimeout(2_000);
+  await settle();
+  assert.equal(reads, 2);
+});
+
 test('repeated config replacement events debounce for two seconds and trigger one fresh read', async () => {
   const scheduler = new FakeScheduler();
   let watchListener: WatchListener | undefined;

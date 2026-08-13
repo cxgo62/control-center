@@ -322,7 +322,7 @@ export function createVpsLineMonitor(dependencies: VpsLineMonitorDependencies): 
       watcher = watchConfig(configDirectoryPath, (_eventType, filename) => {
         if (lifecycle !== 'running') return;
         const changedFileName = Buffer.isBuffer(filename) ? filename.toString('utf8') : filename;
-        if (changedFileName !== configFileName) return;
+        if (changedFileName !== null && changedFileName !== configFileName) return;
         if (debounceTimer !== undefined) cancelTimeout(debounceTimer);
         debounceTimer = scheduleTimeout(() => {
           debounceTimer = undefined;
