@@ -1,8 +1,9 @@
 import React from 'react';
 import type { NetworkData, NetDest, NetBucket } from '../types.js';
-import { api } from '../api.js';
+import { api, type ClashStatus, type KiwiVmTrafficResponse, type KiwiVmTrafficSuccess } from '../api.js';
 import { StatusDot, ToastStack, useToast, fmtAgo } from './Shared.js';
 import { cardHoverPosition, formatBucketTooltip } from './uptime-bar-tooltip.js';
+import { formatShanghaiResetTime, formatTrafficBytes, formatUsagePercent } from './kiwivm-format.js';
 
 const NET_BUCKETS = 48;
 
@@ -331,16 +332,120 @@ interface ProxyStatus {
   lastProbedAt: number | null;
 }
 
-interface FlClashConfig {
-  mixedPort: number;
-  mode: string;
-  tunEnabled: boolean;
-  tunStack: string;
-  error?: string;
-}
-
 // ---- Network sidebar ----
 interface LinkStats { up: boolean; avgLatencyMs: number; }
+
+const KIWI_SEVERITY = {
+  normal: { label: '正常', color: '#3fb950' },
+  notice: { label: '提醒', color: '#d9a531' },
+  warning: { label: '警告', color: '#e58b3a' },
+  critical: { label: '严重', color: '#f15a4a' },
+} as const;
+
+function KiwiVmSuccessCard({ data }: { data: KiwiVmTrafficSuccess }) {
+  const severity = KIWI_SEVERITY[data.severity];
+  const progress = Math.min(Math.max(data.usagePercent, 0), 100);
+  const metrics = [
+    { label: '已使用', value: formatTrafficBytes(data.usedBytes), color: severity.color },
+    { label: '套餐总量', value: formatTrafficBytes(data.totalBytes), color: '#cdd6e1' },
+    { label: '剩余', value: formatTrafficBytes(data.remainingBytes), color: '#7fb4ff' },
+  ];
+
+  return (
+    <div style={{
+      borderRadius: 10,
+      border: `1px solid ${severity.color}38`,
+      background: `${severity.color}0d`,
+      overflow: 'hidden',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+        padding: '8px 11px 7px', borderBottom: '1px solid rgba(255,255,255,.06)',
+      }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#7fb4ff', letterSpacing: '.04em' }}>搬瓦工 · KiwiVM</div>
+          <div style={{ fontSize: 9.5, color: '#687382', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }} title={`${data.hostname} · ${data.location}`}>
+            {data.hostname} · {data.location}
+          </div>
+        </div>
+        <span style={{
+          flex: 'none', fontSize: 9, fontWeight: 800, color: severity.color,
+          border: `1px solid ${severity.color}55`, background: `${severity.color}16`,
+          borderRadius: 999, padding: '2px 7px',
+        }}>{severity.label}</span>
+      </div>
+
+      <div style={{ padding: '9px 11px 10px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+          <span style={{ fontSize: 9, color: '#687382', letterSpacing: '.07em' }}>本周期使用率</span>
+          <span style={{ fontSize: 12, fontWeight: 800, color: severity.color, fontFamily: '"JetBrains Mono",monospace' }}>
+            {formatUsagePercent(data.usagePercent)}
+          </span>
+        </div>
+        <div style={{ height: 5, borderRadius: 999, overflow: 'hidden', background: 'rgba(255,255,255,.08)' }}>
+          <div style={{ width: `${progress}%`, height: '100%', borderRadius: 999, background: severity.color, transition: 'width .25s ease' }} />
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginTop: 10 }}>
+          {metrics.map(metric => (
+            <div key={metric.label} style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 8.5, color: '#596270', marginBottom: 3 }}>{metric.label}</div>
+              <div style={{
+                fontSize: 9.5, fontWeight: 700, color: metric.color,
+                fontFamily: '"JetBrains Mono",monospace', whiteSpace: 'nowrap',
+              }}>{metric.value}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ height: 1, background: 'rgba(255,255,255,.06)', margin: '9px 0 7px' }} />
+        <div style={{ fontSize: 8.5, color: '#596270', marginBottom: 3 }}>下次重置</div>
+        <div style={{ fontSize: 9.5, color: '#9ba7b5', fontFamily: '"JetBrains Mono",monospace' }}>
+          {formatShanghaiResetTime(data.nextResetAt)}
+        </div>
+
+        {(data.suspended || data.policyViolation) && (
+          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {data.suspended && <div style={{ fontSize: 9.5, color: '#f15a4a', fontWeight: 700 }}>● VPS 已暂停</div>}
+            {data.policyViolation && <div style={{ fontSize: 9.5, color: '#f15a4a', fontWeight: 700 }}>● 存在策略违规</div>}
+          </div>
+        )}
+        {data.monthlyDataMultiplier !== 1 && (
+          <div style={{ marginTop: 8, fontSize: 9, color: '#d9a531', lineHeight: 1.4 }}>
+            计费倍率 ×{data.monthlyDataMultiplier} · 待与 KiwiVM 面板校准
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function KiwiVmCard({ data }: { data: KiwiVmTrafficResponse | null }) {
+  if (data?.configured && !('error' in data)) return <KiwiVmSuccessCard data={data} />;
+
+  const isError = data?.configured === true && 'error' in data;
+  return (
+    <div style={{
+      borderRadius: 10, padding: '9px 11px',
+      border: `1px solid ${isError ? 'rgba(241,90,74,.25)' : 'rgba(90,160,250,.18)'}`,
+      background: isError ? 'rgba(241,90,74,.05)' : 'rgba(90,160,250,.04)',
+    }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#7fb4ff', letterSpacing: '.04em', marginBottom: 5 }}>
+        搬瓦工 · KiwiVM
+      </div>
+      {data === null ? (
+        <div style={{ fontSize: 10, color: '#687382' }}>正在加载流量状态…</div>
+      ) : isError ? (
+        <div style={{ fontSize: 10, color: '#f15a4a', lineHeight: 1.45 }}>{data.error.message}</div>
+      ) : (
+        <>
+          <div style={{ fontSize: 10.5, color: '#d9a531', fontWeight: 700, marginBottom: 3 }}>待配置凭据</div>
+          <div style={{ fontSize: 9.5, color: '#687382', fontFamily: '"JetBrains Mono",monospace' }}>.private/kiwivm.env</div>
+        </>
+      )}
+    </div>
+  );
+}
 
 interface NetworkSidebarProps {
   onProbe: () => void;
@@ -351,7 +456,8 @@ interface NetworkSidebarProps {
 
 function NetworkSidebar({ onProbe, probing, domestic, international }: NetworkSidebarProps) {
   const [status, setStatus] = React.useState<ProxyStatus | null>(null);
-  const [flclash, setFlclash] = React.useState<FlClashConfig | null>(null);
+  const [clash, setClash] = React.useState<ClashStatus | null>(null);
+  const [kiwiVm, setKiwiVm] = React.useState<KiwiVmTrafficResponse | null>(null);
   const [showModal, setShowModal] = React.useState(false);
   const [modalUrl, setModalUrl] = React.useState('');
   const [saving, setSaving] = React.useState(false);
@@ -364,18 +470,37 @@ function NetworkSidebar({ onProbe, probing, domestic, international }: NetworkSi
     } catch { /* ignore */ }
   }, []);
 
-  const fetchFlClash = React.useCallback(async () => {
+  const fetchClash = React.useCallback(async () => {
     try {
-      const f = await api.getFlClash();
-      setFlclash(f);
-    } catch { /* ignore */ }
+      setClash(await api.getClashStatus());
+    } catch {
+      setClash({
+        available: false,
+        error: { code: 'CLASH_CONFIG_UNAVAILABLE', message: 'Clash Verge 配置不可用' },
+      });
+    }
   }, []);
 
-  React.useEffect(() => { fetchStatus(); fetchFlClash(); }, [fetchStatus, fetchFlClash]);
+  const fetchKiwiVm = React.useCallback(async () => {
+    try {
+      setKiwiVm(await api.getKiwiVmTraffic());
+    } catch {
+      setKiwiVm({
+        configured: true,
+        error: { code: 'KIWIVM_NETWORK_ERROR', message: '无法加载 KiwiVM 流量状态' },
+      });
+    }
+  }, []);
+
+  React.useEffect(() => { fetchStatus(); fetchClash(); fetchKiwiVm(); }, [fetchStatus, fetchClash, fetchKiwiVm]);
   React.useEffect(() => {
     const t = setInterval(fetchStatus, 30_000);
     return () => clearInterval(t);
   }, [fetchStatus]);
+  React.useEffect(() => {
+    const t = setInterval(fetchKiwiVm, 5 * 60_000);
+    return () => clearInterval(t);
+  }, [fetchKiwiVm]);
 
   const openModal = () => {
     setModalUrl(status?.proxyUrl ?? '');
@@ -445,8 +570,8 @@ function NetworkSidebar({ onProbe, probing, domestic, international }: NetworkSi
           </div>
         </div>
 
-        {/* FlClash status block */}
-        {flclash && !flclash.error && (
+        {/* Clash Verge status block */}
+        {clash?.available ? (
           <div style={{
             borderRadius: 10,
             border: '1px solid rgba(90,160,250,.2)',
@@ -458,15 +583,14 @@ function NetworkSidebar({ onProbe, probing, domestic, international }: NetworkSi
               padding: '8px 11px 7px',
               borderBottom: '1px solid rgba(255,255,255,.06)',
             }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: '#7fb4ff', letterSpacing: '.04em' }}>FlClash</span>
-              <span style={{ fontSize: 9.5, fontFamily: '"JetBrains Mono",monospace', color: '#525a66' }}>v0.8.92</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#7fb4ff', letterSpacing: '.04em' }}>Clash Verge</span>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, background: 'rgba(255,255,255,.04)' }}>
               {[
-                { label: 'TUN 模式', value: flclash.tunEnabled ? '已开启' : '未开启', color: flclash.tunEnabled ? '#3fb950' : '#d9a531' },
-                { label: '协议栈',   value: flclash.tunStack,                          color: '#cdd6e1' },
-                { label: '代理端口', value: flclash.mixedPort ? `:${flclash.mixedPort}` : '—', color: '#9b8cfa' },
-                { label: '路由模式', value: flclash.mode,                              color: '#aab4c2' },
+                { label: 'TUN 模式', value: clash.tunEnabled ? '已开启' : '未开启', color: clash.tunEnabled ? '#3fb950' : '#d9a531' },
+                { label: '协议栈',   value: clash.tunStack,                          color: '#cdd6e1' },
+                { label: '代理端口', value: `:${clash.mixedPort}`,                  color: '#9b8cfa' },
+                { label: '路由模式', value: clash.mode,                             color: '#aab4c2' },
               ].map(({ label, value, color }) => (
                 <div key={label} style={{ padding: '8px 11px', background: '#10151d' }}>
                   <div style={{ fontSize: 9, color: '#525a66', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 3 }}>{label}</div>
@@ -475,7 +599,19 @@ function NetworkSidebar({ onProbe, probing, domestic, international }: NetworkSi
               ))}
             </div>
           </div>
+        ) : (
+          <div style={{
+            borderRadius: 10, padding: '9px 11px',
+            border: '1px solid rgba(90,160,250,.18)', background: 'rgba(90,160,250,.04)',
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#7fb4ff', letterSpacing: '.04em', marginBottom: 4 }}>Clash Verge</div>
+            <div style={{ fontSize: 10, color: clash ? '#d9a531' : '#687382' }}>
+              {clash ? clash.error.message : '正在加载配置…'}
+            </div>
+          </div>
         )}
+
+        <KiwiVmCard data={kiwiVm} />
 
         {/* Network status */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

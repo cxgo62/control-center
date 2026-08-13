@@ -1,3 +1,53 @@
+export type ClashStatus =
+  | {
+      available: true;
+      mixedPort: number;
+      mode: string;
+      tunEnabled: boolean;
+      tunStack: string;
+    }
+  | {
+      available: false;
+      error: { code: 'CLASH_CONFIG_UNAVAILABLE'; message: string };
+    };
+
+export type KiwiVmSeverity = 'normal' | 'notice' | 'warning' | 'critical';
+
+export interface KiwiVmTrafficSuccess {
+  configured: true;
+  hostname: string;
+  location: string;
+  usedBytes: number;
+  totalBytes: number;
+  remainingBytes: number;
+  usagePercent: number;
+  monthlyDataMultiplier: number;
+  calculationMethod: 'used-times-multiplier';
+  nextResetAt: number;
+  suspended: boolean;
+  policyViolation: boolean;
+  severity: KiwiVmSeverity;
+  fetchedAt: number;
+  cached: boolean;
+}
+
+export type KiwiVmTrafficResponse =
+  | KiwiVmTrafficSuccess
+  | { configured: false; reason: 'credentials_missing' }
+  | {
+      configured: true;
+      error: {
+        code:
+          | 'KIWIVM_TIMEOUT'
+          | 'KIWIVM_NETWORK_ERROR'
+          | 'KIWIVM_UPSTREAM_HTTP'
+          | 'KIWIVM_INVALID_JSON'
+          | 'KIWIVM_API_ERROR'
+          | 'KIWIVM_INVALID_DATA';
+        message: string;
+      };
+    };
+
 export const api = {
   getServices: () => fetch('/api/services').then(r => r.json()),
   getEvents: () => fetch('/api/events').then(r => r.json()),
@@ -26,5 +76,8 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ proxyUrl }),
     }).then(r => r.json()),
-  getFlClash: () => fetch('/api/flclash').then(r => r.json()),
+  getClashStatus: () =>
+    fetch('/api/network/clash').then(r => r.json()) as Promise<ClashStatus>,
+  getKiwiVmTraffic: () =>
+    fetch('/api/network/kiwivm-traffic').then(r => r.json()) as Promise<KiwiVmTrafficResponse>,
 };
