@@ -40,9 +40,9 @@ The `damkeeper.top` and `www.damkeeper.top` loopback override will be removed fr
 
 ## Client Path Handling
 
-Vite will use `/control-center/` as its base path. Browser-visible asset URLs and the upstream paths received by Vite will therefore remain under `/control-center/`. Preserving the prefix avoids the redirect loop that would occur if Vite received `/` and redirected it back to its configured base path.
+The launchd supervisor will start Vite with `/control-center/` as its base path. Browser-visible asset URLs and the upstream paths received by that service will therefore remain under `/control-center/`. Preserving the prefix avoids the redirect loop that would occur if Vite received `/` and redirected it back to its configured base path. Direct development and the existing root production build keep `/` as their default base path so `npm start` remains compatible.
 
-Client API requests will be built from Vite's base URL rather than from the domain root. Vite will add an explicit `/control-center/api` proxy rule because proxy matching runs before Vite's base-path middleware. For example, the browser and Nginx both send `/control-center/api/services` to Vite; that proxy rule rewrites it to `/api/services` and forwards it to Fastify on port `9000`. The existing `/api` proxy remains available for direct development compatibility.
+Client API requests will be built from Vite's runtime base URL rather than from the domain root. Under launchd, Vite adds an explicit `/control-center/api` proxy rule because proxy matching runs before Vite's base-path middleware. For example, the browser and Nginx both send `/control-center/api/services` to Vite; that proxy rule rewrites it to `/api/services` and forwards it to Fastify on port `9000`. The existing `/api` proxy remains available for direct development and root production compatibility.
 
 This keeps all browser traffic on the public Nginx origin and preserves the current internal API proxy behavior observed on port `5173`.
 
@@ -68,7 +68,7 @@ Access and error logging continue through the existing Nginx log files, whose st
 Automated tests will first establish the required client base-path behavior and fail before the implementation change. After implementation:
 
 1. Client tests verify that API URLs are rooted under `/control-center/api/`.
-2. The client production build verifies asset URLs are rooted under `/control-center/`.
+2. Client builds verify normal production assets remain rooted under `/assets/` and the launchd-configured build uses `/control-center/assets/`.
 3. `nginx -t` validates the complete Nginx configuration before reload.
 4. Nginx reloads immediately after configuration validation succeeds.
 5. Local requests through Nginx verify that `/control-center` redirects once, `/control-center/` returns HTML with status `200` without another redirect, and a static asset and API endpoint both succeed.

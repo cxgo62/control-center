@@ -15,7 +15,9 @@
 - Create `client/src/control-center-paths.ts`: single source of truth for the public base path, API URL construction, and Vite proxy path rewrite.
 - Create `client/test/control-center-paths.test.ts`: path behavior regression tests.
 - Modify `client/src/api.ts`: use the public base-path helper for every API request.
-- Modify `client/vite.config.ts`: configure the public base and the prefixed API proxy while keeping direct `/api` development compatibility.
+- Modify `client/vite.config.ts`: configure an environment-selected public base and prefixed API proxy while keeping root `/api` development and production compatibility.
+- Modify `server/supervisor.mjs`: set `/control-center/` only for the launchd-managed Vite child.
+- Modify `server/test/supervisor.test.ts`: verify the launchd Vite environment without changing the backend child.
 - Modify `/opt/homebrew/etc/nginx/servers/cloudflare-gateway.conf`: add the two control-center locations only; preserve `/cx-tools/` and `/`.
 - Modify `/etc/hosts`: remove only the `damkeeper.top`/`www.damkeeper.top` loopback line.
 
@@ -92,21 +94,27 @@ git add client/src/control-center-paths.ts client/test/control-center-paths.test
 git commit -m "test: define control center public paths"
 ```
 
-### Task 2: Route client API calls and Vite traffic under the base path
+### Task 2: Route launchd client traffic under the base path without breaking root mode
 
 **Files:**
 - Modify: `client/src/api.ts`
 - Modify: `client/vite.config.ts`
 - Modify: `client/test/control-center-paths.test.ts`
+- Create: `client/src/vite-env.d.ts`
+- Modify: `server/supervisor.mjs`
+- Modify: `server/test/supervisor.test.ts`
 
 - [ ] **Step 1: Extend the failing test to inspect Vite configuration**
 
 Add an import for `../vite.config.js` and assertions that:
 
 ```ts
-assert.equal(viteConfig.base, CONTROL_CENTER_BASE_PATH);
-assert.ok(viteConfig.server?.proxy?.['/control-center/api']);
+assert.equal(viteConfig.base, '/');
 assert.ok(viteConfig.server?.proxy?.['/api']);
+
+const publicConfig = createViteConfig(CONTROL_CENTER_BASE_PATH);
+assert.equal(publicConfig.base, CONTROL_CENTER_BASE_PATH);
+assert.ok(publicConfig.server?.proxy?.['/control-center/api']);
 ```
 
 Run: `cd client && node --import tsx --test --test-name-pattern='configures Vite' test/control-center-paths.test.ts`
@@ -115,35 +123,24 @@ Expected: FAIL because Vite has no `base` and no `/control-center/api` proxy.
 
 - [ ] **Step 2: Configure Vite with the shared base and proxy rewrite**
 
-Update `client/vite.config.ts` to import the shared helpers and define:
+Update `client/vite.config.ts` to default to `/`, accept `CONTROL_CENTER_PUBLIC_BASE_PATH`, and build the prefixed proxy only when configured. Update `server/supervisor.mjs` so only its Vite child receives `CONTROL_CENTER_PUBLIC_BASE_PATH=/control-center/`; add a supervisor test that verifies this environment and preserves inherited values.
 
 ```ts
 const apiTarget = 'http://localhost:9000';
 
-export default defineConfig({
-  base: CONTROL_CENTER_BASE_PATH,
-  plugins: [react()],
-  server: {
-    proxy: {
-      [`${CONTROL_CENTER_BASE_PATH}api`]: {
-        target: apiTarget,
-        rewrite: stripControlCenterBase,
-      },
-      '/api': apiTarget,
-    },
-  },
-  build: { outDir: 'dist' },
-});
+export default createViteConfig(
+  process.env.CONTROL_CENTER_PUBLIC_BASE_PATH ?? '/',
+);
 ```
 
 - [ ] **Step 3: Replace root-relative fetch URLs**
 
-Import `apiPath` in `client/src/api.ts` and wrap every `/api/...` fetch URL. Preserve query strings and HTTP options. Examples:
+Import `apiPath` in `client/src/api.ts` and wrap every `/api/...` fetch URL using `import.meta.env.BASE_URL`. Preserve query strings and HTTP options. Examples:
 
 ```ts
-getServices: () => fetch(apiPath('/services')).then(r => r.json()),
+getServices: () => fetch(apiPath('/services', import.meta.env.BASE_URL)).then(r => r.json()),
 getNetworkData: (range: string) =>
-  fetch(`${apiPath('/network/data')}?range=${range}`).then(r => r.json()),
+  fetch(`${apiPath('/network/data', import.meta.env.BASE_URL)}?range=${range}`).then(r => r.json()),
 ```
 
 - [ ] **Step 4: Run tests and production build**
@@ -154,7 +151,11 @@ Expected: all client tests PASS.
 
 Run: `cd client && npm run build`
 
-Expected: TypeScript and Vite build succeed; `client/dist/index.html` references `/control-center/assets/`.
+Expected: TypeScript and Vite build succeed; the default `client/dist/index.html` references `/assets/`.
+
+Run: `cd client && CONTROL_CENTER_PUBLIC_BASE_PATH=/control-center/ npm run build`
+
+Expected: the launchd-configured build succeeds and references `/control-center/assets/`.
 
 - [ ] **Step 5: Commit client routing support**
 
