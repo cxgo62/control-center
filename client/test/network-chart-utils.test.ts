@@ -71,24 +71,14 @@ test('shows missing buckets and absent series buckets as 无数据', () => {
 test('uses one VPS bucket index for latency and packet-loss hover layers', () => {
   const index = latencyBucketIndexAtX(160, 300, 40, 20, 3);
   assert.equal(index, 1);
-  assert.equal(latencySeries[0].buckets[index].startAt, latencySeries[1].buckets[index].startAt);
-});
+  const vpsBuckets: VpsLineBucket[] = [
+    { startAt: Date.UTC(2026, 7, 14, 0, 0), endAt: Date.UTC(2026, 7, 14, 0, 5), hasData: true, medianLatencyMs: 30, p95LatencyMs: 50, sent: 10, lost: 0, lossPercent: 0, jitterMs: 1, tcpState: 'up' },
+    { startAt: Date.UTC(2026, 7, 14, 0, 5), endAt: Date.UTC(2026, 7, 14, 0, 10), hasData: true, medianLatencyMs: 0, p95LatencyMs: 42.5, sent: 10, lost: 1, lossPercent: 10, jitterMs: 2.5, tcpState: 'up' },
+    { startAt: Date.UTC(2026, 7, 14, 0, 10), endAt: Date.UTC(2026, 7, 14, 0, 15), hasData: false, medianLatencyMs: null, p95LatencyMs: null, sent: null, lost: null, lossPercent: null, jitterMs: null, tcpState: 'unknown' },
+  ];
 
-test('builds a complete VPS tooltip view model', () => {
-  const bucket: VpsLineBucket = {
-    startAt: new Date(2026, 7, 14, 8, 0, 0).getTime(),
-    endAt: new Date(2026, 7, 14, 8, 5, 0).getTime(),
-    hasData: true,
-    medianLatencyMs: 0,
-    p95LatencyMs: 42.5,
-    sent: 10,
-    lost: 1,
-    lossPercent: 10,
-    jitterMs: 2.5,
-    tcpState: 'up',
-  };
-  assert.deepEqual(buildVpsTooltip(bucket), {
-    interval: '08:00:00–08:05:00',
+  assert.deepEqual(buildVpsTooltip(vpsBuckets[index]), {
+    interval: '08:05:00–08:10:00',
     medianLatency: '0ms',
     p95Latency: '42.5ms',
     lossPercent: '10%',
@@ -96,16 +86,35 @@ test('builds a complete VPS tooltip view model', () => {
     jitter: '2.5ms',
     tcp: 'up',
   });
+
+  assert.deepEqual(buildVpsTooltip(vpsBuckets[index + 1]), {
+    interval: '08:10:00–08:15:00',
+    message: '该时段无探测数据',
+  });
 });
 
-test('uses the required message for a VPS bucket without probe data', () => {
+test('formats VPS intervals in Asia/Shanghai regardless of process timezone', () => {
   const bucket: VpsLineBucket = {
-    startAt: 0, endAt: 60_000, hasData: false,
-    medianLatencyMs: null, p95LatencyMs: null, sent: null, lost: null,
+    startAt: Date.UTC(2026, 7, 14, 0, 0),
+    endAt: Date.UTC(2026, 7, 14, 0, 5),
+    hasData: false, medianLatencyMs: null, p95LatencyMs: null, sent: null, lost: null,
     lossPercent: null, jitterMs: null, tcpState: 'unknown',
   };
   assert.deepEqual(buildVpsTooltip(bucket), {
-    interval: '08:00:00–08:01:00',
+    interval: '08:00:00–08:05:00',
+    message: '该时段无探测数据',
+  });
+});
+
+test('disambiguates VPS intervals that cross an Asia/Shanghai date boundary', () => {
+  const bucket: VpsLineBucket = {
+    startAt: Date.UTC(2026, 7, 14, 15, 59, 30),
+    endAt: Date.UTC(2026, 7, 14, 16, 0, 45),
+    hasData: false, medianLatencyMs: null, p95LatencyMs: null, sent: null, lost: null,
+    lossPercent: null, jitterMs: null, tcpState: 'unknown',
+  };
+  assert.deepEqual(buildVpsTooltip(bucket), {
+    interval: '08-14 23:59:30–08-15 00:00:45',
     message: '该时段无探测数据',
   });
 });

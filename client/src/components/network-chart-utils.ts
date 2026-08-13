@@ -31,14 +31,37 @@ function formatMilliseconds(value: number | null): string {
   return value !== null && Number.isFinite(value) ? `${formatNumber(value)}ms` : '无数据';
 }
 
-function time(value: Date): string {
-  return `${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}:${String(value.getSeconds()).padStart(2, '0')}`;
+type ShanghaiDateTime = {
+  monthDay: string;
+  time: string;
+};
+
+function shanghaiDateTime(value: Date): ShanghaiDateTime {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = new Map(formatter.formatToParts(value).map(part => [part.type, part.value]));
+  return {
+    monthDay: `${parts.get('month')}-${parts.get('day')}`,
+    time: `${parts.get('hour')}:${parts.get('minute')}:${parts.get('second')}`,
+  };
 }
 
 function formatInterval(startAt: number, endAt: number): string {
   const start = new Date(startAt);
   const end = new Date(endAt);
-  return Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) ? '无效时间' : `${time(start)}–${time(end)}`;
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return '无效时间';
+  const startDateTime = shanghaiDateTime(start);
+  const endDateTime = shanghaiDateTime(end);
+  return startDateTime.monthDay === endDateTime.monthDay
+    ? `${startDateTime.time}–${endDateTime.time}`
+    : `${startDateTime.monthDay} ${startDateTime.time}–${endDateTime.monthDay} ${endDateTime.time}`;
 }
 
 /** Maps a pointer x coordinate to the common bucket index within a chart's drawable content. */
