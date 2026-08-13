@@ -30,6 +30,8 @@ Use the approved “top status bar” layout:
 The monitored target is the private BandwagonHost node, not whichever public proxy is currently selected in Clash Verge.
 
 - Identify the node by a stable configured Clash node name. Add a server-side monitor configuration with the node name; do not send this configuration object to the browser.
+- Supply the name through the `VPS_LINE_NODE_NAME` environment variable, normalized by trimming whitespace in `server/src/config.ts`. The name is an identifier, not a resolved address.
+- If `VPS_LINE_NODE_NAME` is absent or blank, keep the server and the rest of the network page running, do not start discovery or probing, log one sanitized startup warning, and return the card-local `私人节点未配置` state. An invalid or unmatched non-empty name returns `无法识别私人节点` and continues the normal low-frequency rediscovery schedule.
 - Read the generated Clash Verge configuration at the existing `clash-verge.yaml` path and locate the matching proxy entry.
 - Extract only the node address and port needed for ICMP and TCP probing. Do not retain or return passwords, UUIDs, transport settings, subscription URLs, controller secrets, or unrelated proxy definitions.
 - Keep the resolved address and port in memory. The browser receives only a fixed display label, never the address or port.
@@ -75,17 +77,19 @@ Add a focused SQLite table for aggregate VPS probe samples. Store no secrets and
 - current median latency, P95, packet-loss rate, jitter, TCP state, and probe time;
 - 48 chronological buckets for the selected range.
 
-Each bucket contains its start and end timestamps, `hasData`, aggregate median latency, aggregate P95 latency, total sent and lost counts, packet-loss percentage, aggregate jitter, and TCP state. Missing buckets remain explicit missing data and are not represented as zero latency or zero loss.
+Each bucket contains its start and end timestamps, `hasData`, aggregate median latency, aggregate P95 latency, total sent and lost counts, packet-loss percentage, aggregate jitter, and TCP state. Bucket TCP state is `up` when every recorded attempt succeeded, `intermittent` when successes and failures are mixed, `down` when every recorded attempt failed, and `unknown` when no attempt exists. Missing buckets remain explicit missing data and are not represented as zero latency or zero loss.
 
 The API uses safe local error codes/messages. It does not return the raw Clash entry, node address, port, parser error text, command output, or secrets.
 
 ## Quality classification
 
-Calculate the card label from the latest five-minute rolling window. The worst matching condition wins:
+Calculate the card label from probe rounds in the latest five-minute rolling window. Sum sent and received counts to calculate window loss, take the median of the stored per-round median RTT values for window latency, and take the arithmetic mean of available per-round jitter values for window jitter. The latest probe round supplies the current TCP state shown in the card and used by the quality label; mixed older TCP results remain visible in chart buckets but do not override a recovered latest connection.
+
+Require at least three completed probe rounds before assigning `good` or `degraded`; until then show `正在积累线路样本`. A failed latest TCP attempt may immediately assign `poor` without waiting for three rounds. After three rounds, zero successful echo responses with a successful latest TCP connection produces the special `Ping 不可用 · 代理端口正常` state rather than treating missing ICMP permission as ordinary packet loss. Otherwise, the worst matching threshold wins:
 
 - `good` / `质量良好`: TCP connects, loss is below 1%, jitter is below 20 ms, and median latency is below 250 ms.
-- `degraded` / `有波动`: loss is 1%–5%, jitter is 20–50 ms, or median latency is 250–400 ms.
-- `poor` / `质量较差`: TCP does not connect, loss exceeds 5%, jitter exceeds 50 ms, or median latency exceeds 400 ms.
+- `degraded` / `有波动`: loss is at least 1% but below 5%, jitter is at least 20 ms but below 50 ms, or median latency is at least 250 ms but below 400 ms.
+- `poor` / `质量较差`: the latest TCP attempt does not connect, loss is at least 5%, jitter is at least 50 ms, or median latency is at least 400 ms.
 - `unavailable` / `数据不可用`: the node cannot be resolved, too little data exists, or ICMP is unavailable.
 
 Boundary values enter the more severe band: 1%, 5%, 20 ms, 50 ms, 250 ms, and 400 ms are classified consistently in pure unit-tested functions.
@@ -104,7 +108,7 @@ The card header shows the fixed private-line label and quality state. Its four p
 The chart has two vertically aligned layers sharing the same 48 buckets:
 
 - a purple median-latency line; and
-- a narrow packet-loss band: green for no loss, yellow for light loss, red for severe loss, and gray for missing data.
+- a narrow packet-loss band: green below 1%, yellow from 1% up to but not including 5%, red at 5% or higher, and gray for missing data.
 
 P95 and jitter remain available in the tooltip rather than becoming extra lines.
 
