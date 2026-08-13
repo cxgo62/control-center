@@ -45,6 +45,23 @@ export interface NetTarget {
   group: 'domestic' | 'international';
 }
 
+export type NetLatencyPath = 'direct' | 'proxy';
+
+export type NetLatencySeries = {
+  id: string;
+  label: string;
+  source:
+    | { kind: 'group'; group: NetTarget['group']; path: NetLatencyPath }
+    | { kind: 'target'; targetId: string; path: NetLatencyPath };
+  color: string;
+  order: number;
+};
+
+export type NetLatencySeriesWarning = {
+  id: string | null;
+  reason: 'invalid-entry' | 'duplicate-id' | 'invalid-group' | 'unknown-target' | 'invalid-path' | 'invalid-color';
+};
+
 export const SERVICES: ServiceConfig[] = [
   {
     id: 'nginx',
@@ -184,6 +201,76 @@ export const NET_TARGETS: NetTarget[] = [
   { id: 'github',   name: 'GitHub',         host: 'github.com',  url: 'https://github.com',       group: 'international' },
   { id: 'cfdns',    name: 'Cloudflare DNS', host: '1.1.1.1',     url: 'https://1.1.1.1',          group: 'international' },
 ];
+
+export const NET_LATENCY_SERIES: NetLatencySeries[] = [
+  { id: 'domestic', label: '国内', source: { kind: 'group', group: 'domestic', path: 'direct' }, color: '#22c55e', order: 10 },
+  { id: 'international', label: '国际', source: { kind: 'group', group: 'international', path: 'proxy' }, color: '#a855f7', order: 20 },
+  { id: 'chatgpt', label: 'ChatGPT', source: { kind: 'target', targetId: 'chatgpt', path: 'proxy' }, color: '#3b82f6', order: 30 },
+  { id: 'google', label: 'Google', source: { kind: 'target', targetId: 'google', path: 'proxy' }, color: '#f59e0b', order: 40 },
+];
+
+function isPath(value: unknown): value is NetLatencyPath {
+  return value === 'direct' || value === 'proxy';
+}
+
+function isUsableColor(value: unknown): value is string {
+  return typeof value === 'string' && /^#[0-9a-f]{3,8}$/i.test(value);
+}
+
+export function validateNetLatencySeries(entries: readonly unknown[]): { series: NetLatencySeries[]; warnings: NetLatencySeriesWarning[] } {
+  const ids = new Set<string>();
+  const targetIds = new Set(NET_TARGETS.map(target => target.id));
+  const series: NetLatencySeries[] = [];
+  const warnings: NetLatencySeriesWarning[] = [];
+
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') {
+      warnings.push({ id: null, reason: 'invalid-entry' });
+      continue;
+    }
+    const candidate = entry as Record<string, unknown>;
+    const id = typeof candidate.id === 'string' ? candidate.id : null;
+    if (!id || typeof candidate.label !== 'string' || !candidate.label.trim() || typeof candidate.order !== 'number' || !Number.isFinite(candidate.order) || !candidate.source || typeof candidate.source !== 'object') {
+      warnings.push({ id, reason: 'invalid-entry' });
+      continue;
+    }
+    if (ids.has(id)) {
+      warnings.push({ id, reason: 'duplicate-id' });
+      continue;
+    }
+    ids.add(id);
+    const source = candidate.source as Record<string, unknown>;
+    if (!isPath(source.path)) {
+      warnings.push({ id, reason: 'invalid-path' });
+      continue;
+    }
+    if (!isUsableColor(candidate.color)) {
+      warnings.push({ id, reason: 'invalid-color' });
+      continue;
+    }
+    if (source.kind === 'group') {
+      if (source.group !== 'domestic' && source.group !== 'international') {
+        warnings.push({ id, reason: 'invalid-group' });
+        continue;
+      }
+      series.push({ id, label: candidate.label, source: { kind: 'group', group: source.group, path: source.path }, color: candidate.color, order: candidate.order });
+      continue;
+    }
+    if (source.kind === 'target') {
+      if (typeof source.targetId !== 'string' || !targetIds.has(source.targetId)) {
+        warnings.push({ id, reason: 'unknown-target' });
+        continue;
+      }
+      series.push({ id, label: candidate.label, source: { kind: 'target', targetId: source.targetId, path: source.path }, color: candidate.color, order: candidate.order });
+      continue;
+    }
+    warnings.push({ id, reason: 'invalid-entry' });
+  }
+
+  return { series: series.sort((left, right) => left.order - right.order), warnings };
+}
+
+export const VPS_LINE_NODE_NAME = (process.env.VPS_LINE_NODE_NAME ?? '').trim();
 
 // Set PROXY_URL env var to your VPN/proxy, e.g. "http://127.0.0.1:7890"
 export const PROXY_URL = process.env.PROXY_URL ?? '';
