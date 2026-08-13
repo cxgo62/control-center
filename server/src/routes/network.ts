@@ -2,11 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { readFileSync } from 'fs';
 import { homedir } from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { NET_TARGETS } from '../config.js';
 import { getNetProbes, getGroupStats, getSetting, setSetting, type NetProbe } from '../db.js';
 import { probeAll, probeTarget, getActiveProxyUrl } from '../prober.js';
 import { createLivePingEntry, latestProbedAt, latestProbeForTarget } from './network-utils.js';
 import { parseClashVergeConfig, unavailableClashStatus } from './clash-status.js';
+import { createKiwiVmTrafficClient, createKiwiVmTrafficHandler } from './kiwivm-traffic.js';
 
 const NET_BUCKETS = 48;
 
@@ -73,6 +75,17 @@ export function buildBuckets(probes: NetProbe[], destId: string, sinceMs: number
 }
 
 export default async function networkRoutes(fastify: FastifyInstance) {
+  const kiwiVmTrafficHandler = createKiwiVmTrafficHandler({
+    readCredentialsFile: () => readFileSync(
+      fileURLToPath(new URL('../../../.private/kiwivm.env', import.meta.url)),
+      'utf-8',
+    ),
+    client: createKiwiVmTrafficClient(),
+    logWarning: entry => {
+      fastify.log.warn(entry, 'KiwiVM traffic query failed');
+    },
+  });
+
   // GET /api/network/data
   fastify.get<{ Querystring: { range?: string } }>('/api/network/data', async request => {
     const range = request.query.range ?? '1h';
@@ -211,5 +224,11 @@ export default async function networkRoutes(fastify: FastifyInstance) {
       );
       return unavailableClashStatus;
     }
+  });
+
+  // GET /api/network/kiwivm-traffic — 读取搬瓦工计费侧的只读流量状态
+  fastify.get('/api/network/kiwivm-traffic', async (_request, reply) => {
+    const result = await kiwiVmTrafficHandler();
+    return reply.code(result.statusCode).send(result.body);
   });
 }

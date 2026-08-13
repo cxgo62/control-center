@@ -164,9 +164,17 @@ interface KiwiVmTrafficClientOptions {
   timeoutMs?: number;
 }
 
-interface KiwiVmTrafficClient {
+export interface KiwiVmTrafficClient {
   get(credentials: KiwiVmCredentials): Promise<KiwiVmTrafficSuccess>;
 }
+
+export type KiwiVmTrafficResponse =
+  | KiwiVmTrafficSuccess
+  | { configured: false; reason: 'credentials_missing' }
+  | {
+      configured: true;
+      error: { code: KiwiVmErrorCode; message: string };
+    };
 
 const KIWIVM_ENDPOINT = 'https://api.64clouds.com/v1/getServiceInfo';
 
@@ -256,5 +264,51 @@ export function createKiwiVmTrafficClient(
         if (inFlight?.promise === promise) inFlight = null;
       }
     },
+  };
+}
+
+interface KiwiVmTrafficHandlerOptions {
+  readCredentialsFile: () => string;
+  client: KiwiVmTrafficClient;
+  logWarning: (entry: { code: KiwiVmErrorCode }) => void;
+}
+
+export function createKiwiVmTrafficHandler(
+  options: KiwiVmTrafficHandlerOptions,
+): () => Promise<{ statusCode: number; body: KiwiVmTrafficResponse }> {
+  return async () => {
+    let content: string;
+    try {
+      content = options.readCredentialsFile();
+    } catch {
+      return {
+        statusCode: 200,
+        body: { configured: false, reason: 'credentials_missing' },
+      };
+    }
+
+    const credentials = parseKiwiVmCredentials(content);
+    if (!credentials) {
+      return {
+        statusCode: 200,
+        body: { configured: false, reason: 'credentials_missing' },
+      };
+    }
+
+    try {
+      return { statusCode: 200, body: await options.client.get(credentials) };
+    } catch (error) {
+      const safeError = error instanceof KiwiVmError
+        ? error
+        : new KiwiVmError('KIWIVM_NETWORK_ERROR', '无法连接 KiwiVM 服务', 502);
+      options.logWarning({ code: safeError.code });
+      return {
+        statusCode: safeError.statusCode,
+        body: {
+          configured: true,
+          error: { code: safeError.code, message: safeError.message },
+        },
+      };
+    }
   };
 }

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createKiwiVmTrafficClient,
+  createKiwiVmTrafficHandler,
   KiwiVmError,
   normalizeKiwiVmResponse,
   parseKiwiVmCredentials,
@@ -259,4 +260,80 @@ test('KiwiVM client does not cache failed requests', async () => {
 
   assert.equal(calls, 2);
   assert.equal(result.cached, false);
+});
+
+test('KiwiVM route returns an unconfigured state for missing or placeholder credentials', async () => {
+  const missing = createKiwiVmTrafficHandler({
+    readCredentialsFile: () => { throw new Error('missing'); },
+    client: { get: async () => { throw new Error('must not fetch'); } },
+    logWarning: () => { throw new Error('must not log setup absence'); },
+  });
+  const placeholder = createKiwiVmTrafficHandler({
+    readCredentialsFile: () => 'KIWIVM_VEID=replace_me\nKIWIVM_API_KEY=replace_me\n',
+    client: { get: async () => { throw new Error('must not fetch'); } },
+    logWarning: () => { throw new Error('must not log setup absence'); },
+  });
+
+  assert.deepEqual(await missing(), {
+    statusCode: 200,
+    body: { configured: false, reason: 'credentials_missing' },
+  });
+  assert.deepEqual(await placeholder(), {
+    statusCode: 200,
+    body: { configured: false, reason: 'credentials_missing' },
+  });
+});
+
+test('KiwiVM route returns normalized client success', async () => {
+  const success = normalizeKiwiVmResponse(validRaw(), 1_000);
+  const handler = createKiwiVmTrafficHandler({
+    readCredentialsFile: () => 'KIWIVM_VEID=dummy-veid\nKIWIVM_API_KEY=dummy-secret\n',
+    client: { get: async () => success },
+    logWarning: () => { throw new Error('must not log success'); },
+  });
+
+  assert.deepEqual(await handler(), { statusCode: 200, body: success });
+});
+
+test('KiwiVM route maps safe known errors and logs only the stable code', async () => {
+  const logEntries: unknown[] = [];
+  const handler = createKiwiVmTrafficHandler({
+    readCredentialsFile: () => 'KIWIVM_VEID=dummy-veid\nKIWIVM_API_KEY=dummy-secret\n',
+    client: {
+      get: async () => {
+        throw new KiwiVmError('KIWIVM_TIMEOUT', 'KiwiVM 查询超时', 504);
+      },
+    },
+    logWarning: entry => { logEntries.push(entry); },
+  });
+
+  assert.deepEqual(await handler(), {
+    statusCode: 504,
+    body: {
+      configured: true,
+      error: { code: 'KIWIVM_TIMEOUT', message: 'KiwiVM 查询超时' },
+    },
+  });
+  assert.deepEqual(logEntries, [{ code: 'KIWIVM_TIMEOUT' }]);
+});
+
+test('KiwiVM route sanitizes unexpected errors and logs no secret material', async () => {
+  const logEntries: unknown[] = [];
+  const handler = createKiwiVmTrafficHandler({
+    readCredentialsFile: () => 'KIWIVM_VEID=dummy-veid\nKIWIVM_API_KEY=dummy-secret\n',
+    client: { get: async () => { throw new Error('dummy-veid dummy-secret'); } },
+    logWarning: entry => { logEntries.push(entry); },
+  });
+
+  const result = await handler();
+  assert.deepEqual(result, {
+    statusCode: 502,
+    body: {
+      configured: true,
+      error: { code: 'KIWIVM_NETWORK_ERROR', message: '无法连接 KiwiVM 服务' },
+    },
+  });
+  assert.equal(JSON.stringify({ result, logEntries }).includes('dummy-secret'), false);
+  assert.equal(JSON.stringify({ result, logEntries }).includes('dummy-veid'), false);
+  assert.deepEqual(logEntries, [{ code: 'KIWIVM_NETWORK_ERROR' }]);
 });
