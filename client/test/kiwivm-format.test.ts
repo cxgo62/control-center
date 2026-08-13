@@ -23,6 +23,15 @@ test('KiwiVM formats usage percentage to two decimals', () => {
   assert.equal(formatUsagePercent(120), '120.00%');
 });
 
+test('KiwiVM preserves threshold-edge precision when rounding would contradict severity', () => {
+  assert.equal(formatUsagePercent(69.999), '69.999%');
+  assert.equal(formatUsagePercent(70), '70.00%');
+  assert.equal(formatUsagePercent(84.999), '84.999%');
+  assert.equal(formatUsagePercent(85), '85.00%');
+  assert.equal(formatUsagePercent(94.999), '94.999%');
+  assert.equal(formatUsagePercent(95), '95.00%');
+});
+
 test('KiwiVM formats reset time in Asia Shanghai explicitly', () => {
   assert.equal(
     formatShanghaiResetTime(Date.UTC(2026, 8, 3, 0, 0, 0)),

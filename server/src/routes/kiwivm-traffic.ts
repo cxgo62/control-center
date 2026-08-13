@@ -136,7 +136,12 @@ export function normalizeKiwiVmResponse(rawValue: unknown, fetchedAt: number): K
   const usedBytes = counterBytes * monthlyDataMultiplier;
   const usagePercent = (usedBytes / totalBytes) * 100;
   const nextResetAt = nextResetSeconds * 1000;
-  if (![usedBytes, usagePercent, nextResetAt].every(Number.isFinite)) throw invalidData();
+  if (
+    ![usedBytes, usagePercent, nextResetAt].every(Number.isFinite)
+    || Number.isNaN(new Date(nextResetAt).getTime())
+  ) {
+    throw invalidData();
+  }
 
   return {
     configured: true,

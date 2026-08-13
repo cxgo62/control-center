@@ -7,6 +7,17 @@ export function formatTrafficBytes(bytes: number): string {
 }
 
 export function formatUsagePercent(percent: number): string {
+  const rounded = Number(percent.toFixed(2));
+  const crossedThreshold = [70, 85, 95].find(
+    threshold => percent < threshold && rounded >= threshold,
+  );
+  if (crossedThreshold !== undefined) {
+    for (let digits = 3; digits <= 15; digits += 1) {
+      if (Number(percent.toFixed(digits)) < crossedThreshold) {
+        return `${percent.toFixed(digits)}%`;
+      }
+    }
+  }
   return `${percent.toFixed(2)}%`;
 }
 

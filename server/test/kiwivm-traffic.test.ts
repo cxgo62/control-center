@@ -96,6 +96,7 @@ test('KiwiVM rejects malformed and unsafe response values', () => {
     { monthly_data_multiplier: 0 },
     { monthly_data_multiplier: '2' },
     { data_next_reset: 0 },
+    { data_next_reset: 1e20 },
     { data_next_reset: '1788364800' },
     { suspended: 2 },
     { policy_violation: 'false' },

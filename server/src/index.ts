@@ -8,13 +8,12 @@ import servicesRoutes, { updateServiceStatus } from './routes/services.js';
 import networkRoutes from './routes/network.js';
 import { checkAllServices } from './checker.js';
 import { probeAll } from './prober.js';
+import { fastifyLoggerOptions } from './logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const fastify = Fastify({
-  logger: {
-    level: 'info',
-  },
+  logger: fastifyLoggerOptions,
 });
 
 // Register CORS (allow all in dev)
