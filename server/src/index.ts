@@ -20,6 +20,12 @@ const fastify = Fastify({
   logger: fastifyLoggerOptions,
 });
 
+const vpsLineMonitor = createVpsLineMonitor({
+  configuredNodeName: VPS_LINE_NODE_NAME,
+  configPath: clashVergeConfigPath(homedir()),
+  logger: fastify.log,
+});
+
 // Register CORS (allow all in dev)
 await fastify.register(cors, {
   origin: true,
@@ -27,7 +33,7 @@ await fastify.register(cors, {
 
 // Register route plugins
 await fastify.register(servicesRoutes);
-await fastify.register(networkRoutes);
+await fastify.register(networkRoutes, { vpsLineMonitor });
 
 // In production, serve the client build
 if (process.env.NODE_ENV === 'production') {
@@ -77,12 +83,6 @@ const serviceCheckInterval = setInterval(() => void runServiceChecks(), 30_000);
 // Background network probe: every 1 minute
 // (foreground fast-probe is triggered by the client via POST /api/network/probe)
 const networkProbeInterval = setInterval(() => void runNetworkProbes(), 60_000);
-
-const vpsLineMonitor = createVpsLineMonitor({
-  configuredNodeName: VPS_LINE_NODE_NAME,
-  configPath: clashVergeConfigPath(homedir()),
-  logger: fastify.log,
-});
 
 // Start server
 try {

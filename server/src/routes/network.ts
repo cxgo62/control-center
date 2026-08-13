@@ -2,12 +2,28 @@ import type { FastifyInstance } from 'fastify';
 import { readFileSync } from 'fs';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
-import { NET_TARGETS } from '../config.js';
-import { getNetProbes, getGroupStats, getSetting, setSetting, type NetProbe } from '../db.js';
+import { NET_LATENCY_SERIES, NET_TARGETS } from '../config.js';
+import {
+  getNetProbes,
+  getGroupStats,
+  getSetting,
+  getVpsLineSamples,
+  setSetting,
+  type GroupStat,
+  type NetProbe,
+  type VpsLineSampleRow,
+} from '../db.js';
 import { probeAll, probeTarget, getActiveProxyUrl } from '../prober.js';
+import type { VpsLineMonitor } from '../vps-line/monitor.js';
 import { createLivePingEntry, latestProbedAt, latestProbeForTarget } from './network-utils.js';
+import { buildLatencySeries } from './network-series.js';
 import { clashVergeConfigPath, parseClashVergeConfig, unavailableClashStatus } from './clash-status.js';
 import { createKiwiVmTrafficClient, createKiwiVmTrafficHandler } from './kiwivm-traffic.js';
+import {
+  buildVpsLineResponse,
+  resolveNetworkRange,
+  unavailableVpsLineResponse,
+} from './vps-line-response.js';
 
 const NET_BUCKETS = 48;
 
@@ -73,7 +89,23 @@ export function buildBuckets(probes: NetProbe[], destId: string, sinceMs: number
   return { buckets, up: currentUp, latencyMs: currentLatency, probedAt: latestProbe?.probed_at ?? null, avail };
 }
 
-export default async function networkRoutes(fastify: FastifyInstance) {
+export interface NetworkRoutesOptions {
+  now?: () => number;
+  latencySeries?: readonly unknown[];
+  getNetProbes?: (path: string, sinceMs: number) => NetProbe[];
+  getGroupStats?: (group: string, sinceMs: number) => GroupStat[];
+  getVpsLineSamples?: (nodeName: string, sinceMs: number) => VpsLineSampleRow[];
+  vpsLineMonitor?: Pick<VpsLineMonitor, 'getDiscoveryState'>;
+}
+
+export default async function networkRoutes(fastify: FastifyInstance, options: NetworkRoutesOptions = {}) {
+  const now = options.now ?? Date.now;
+  const readNetProbes = options.getNetProbes ?? getNetProbes;
+  const readGroupStats = options.getGroupStats ?? getGroupStats;
+  const readVpsLineSamples = options.getVpsLineSamples ?? getVpsLineSamples;
+  const vpsLineMonitor = options.vpsLineMonitor ?? {
+    getDiscoveryState: () => ({ status: 'unconfigured' as const }),
+  };
   const kiwiVmTrafficHandler = createKiwiVmTrafficHandler({
     readCredentialsFile: () => readFileSync(
       fileURLToPath(new URL('../../../.private/kiwivm.env', import.meta.url)),
@@ -87,60 +119,71 @@ export default async function networkRoutes(fastify: FastifyInstance) {
 
   // GET /api/network/data
   fastify.get<{ Querystring: { range?: string } }>('/api/network/data', async request => {
-    const range = request.query.range ?? '1h';
-    const now = Date.now();
+    const nowMs = now();
+    const { sinceMs } = resolveNetworkRange(request.query.range, nowMs);
+    const probeCache = new Map<string, NetProbe[]>();
+    const getCachedProbes = (path: string): NetProbe[] => {
+      let probes = probeCache.get(path);
+      if (!probes) {
+        probes = readNetProbes(path, sinceMs);
+        probeCache.set(path, probes);
+      }
+      return probes;
+    };
 
-    let sinceMs: number;
-    switch (range) {
-      case '6h':  sinceMs = now - 21600000; break;
-      case '24h': sinceMs = now - 86400000; break;
-      case '7d':  sinceMs = now - 604800000; break;
-      case '1h':
-      default:    sinceMs = now - 3600000; break;
-    }
-
-    const directProbes = getNetProbes('direct', sinceMs);
-    const proxyProbes = getNetProbes('proxy', sinceMs);
+    const directProbes = getCachedProbes('direct');
+    const proxyProbes = getCachedProbes('proxy');
 
     const direct: NetDestResponse[] = NET_TARGETS.map(target => {
-      const result = buildBuckets(directProbes, target.id, sinceMs, now);
+      const result = buildBuckets(directProbes, target.id, sinceMs, nowMs);
       return { id: target.id, name: target.name, host: target.host, group: target.group, ...result };
     });
 
     const proxy: NetDestResponse[] = NET_TARGETS.map(target => {
-      const result = buildBuckets(proxyProbes, target.id, sinceMs, now);
+      const result = buildBuckets(proxyProbes, target.id, sinceMs, nowMs);
       return { id: target.id, name: target.name, host: target.host, group: target.group, ...result };
     });
 
-    // 从预聚合表读取分组折线数据（国内/国际），避免实时聚合开销
-    const bucketSize = (now - sinceMs) / NET_BUCKETS;
-    const domesticStats     = getGroupStats('domestic',      sinceMs);
-    const internationalStats = getGroupStats('international', sinceMs);
-
-    const toLine = (stats: typeof domesticStats) =>
-      Array.from({ length: NET_BUCKETS }, (_, i) => {
-        const bs = sinceMs + i * bucketSize;
-        const be = bs + bucketSize;
-        const vals = stats
-          .filter(s => s.computed_at >= bs && s.computed_at < be && s.avg_latency_ms != null)
-          .map(s => s.avg_latency_ms!);
-        return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
-      });
-
-    const lineDomestic      = toLine(domesticStats);
-    const lineInternational = toLine(internationalStats);
+    const latencySeries = buildLatencySeries({
+      entries: options.latencySeries ?? NET_LATENCY_SERIES,
+      sinceMs,
+      nowMs,
+      getGroupStats: readGroupStats,
+      getNetProbes: path => getCachedProbes(path),
+      logWarning: warning => {
+        fastify.log.warn(warning, 'Network latency series skipped');
+      },
+    });
 
     // Most recent probe timestamp
     const allProbes = [...directProbes, ...proxyProbes];
-    const probedAt = latestProbedAt(allProbes, now);
+    const probedAt = latestProbedAt(allProbes, nowMs);
 
     return {
       direct,
       proxy,
-      lineDomestic,
-      lineInternational,
+      latencySeries,
       probedAt,
     };
+  });
+
+  fastify.get<{ Querystring: { range?: string } }>('/api/network/vps-line', async (request, reply) => {
+    const nowMs = now();
+    const { sinceMs } = resolveNetworkRange(request.query.range, nowMs);
+    try {
+      const discoveryState = vpsLineMonitor.getDiscoveryState();
+      if (discoveryState.status !== 'resolved') {
+        return buildVpsLineResponse(discoveryState, [], sinceMs, nowMs);
+      }
+      const samples = readVpsLineSamples(discoveryState.nodeName, sinceMs);
+      return buildVpsLineResponse(discoveryState, samples, sinceMs, nowMs);
+    } catch {
+      fastify.log.error(
+        { code: 'VPS_LINE_ROUTE_FAILED', category: 'data_unavailable' },
+        'VPS line response unavailable',
+      );
+      return reply.code(503).send(unavailableVpsLineResponse);
+    }
   });
 
   // POST /api/network/probe — 触发一次完整探测并写入 DB（后台定时 / 手动刷新用）
