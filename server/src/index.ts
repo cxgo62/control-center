@@ -1,14 +1,18 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import staticPlugin from '@fastify/static';
+import { homedir } from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { VPS_LINE_NODE_NAME } from './config.js';
 import { db } from './db.js';
 import servicesRoutes, { updateServiceStatus } from './routes/services.js';
 import networkRoutes from './routes/network.js';
 import { checkAllServices } from './checker.js';
 import { probeAll } from './prober.js';
 import { fastifyLoggerOptions } from './logger.js';
+import { clashVergeConfigPath } from './routes/clash-status.js';
+import { createVpsLineMonitor } from './vps-line/monitor.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -45,54 +49,85 @@ async function runServiceChecks() {
   try {
     const statuses = await checkAllServices();
     updateServiceStatus(statuses);
-    fastify.log.info(`Checked ${statuses.length} services`);
+    fastify.log.info({
+      code: 'SERVICE_CHECKS_COMPLETED',
+      serviceCount: statuses.length,
+    }, 'Service checks completed');
   } catch (err) {
-    fastify.log.error(err, 'Service check failed');
+    fastify.log.error({ code: 'SERVICE_CHECKS_FAILED', err }, 'Service checks failed');
   }
 }
 
 async function runNetworkProbes() {
   try {
     await probeAll();
-    fastify.log.info('Network probes complete');
+    fastify.log.info({ code: 'NETWORK_PROBES_COMPLETED' }, 'Network probes completed');
   } catch (err) {
-    fastify.log.error(err, 'Network probe failed');
+    fastify.log.error({ code: 'NETWORK_PROBES_FAILED', err }, 'Network probes failed');
   }
 }
 
 // Run immediately on startup
-runServiceChecks();
-runNetworkProbes();
+void runServiceChecks();
+void runNetworkProbes();
 
 // Check services every 30 seconds
-setInterval(runServiceChecks, 30_000);
+const serviceCheckInterval = setInterval(() => void runServiceChecks(), 30_000);
 
 // Background network probe: every 1 minute
 // (foreground fast-probe is triggered by the client via POST /api/network/probe)
-setInterval(runNetworkProbes, 60_000);
+const networkProbeInterval = setInterval(() => void runNetworkProbes(), 60_000);
+
+const vpsLineMonitor = createVpsLineMonitor({
+  configuredNodeName: VPS_LINE_NODE_NAME,
+  configPath: clashVergeConfigPath(homedir()),
+  logger: fastify.log,
+});
 
 // Start server
 try {
+  await vpsLineMonitor.start();
   const port = parseInt(process.env.PORT ?? '9000');
   await fastify.listen({ port, host: '0.0.0.0' });
-  fastify.log.info(`Control Center server running on http://localhost:${port}`);
+  fastify.log.info({ code: 'CONTROL_CENTER_STARTED', port }, 'Control Center server started');
 } catch (err) {
-  fastify.log.error(err);
-  db.close();
+  fastify.log.error({ code: 'CONTROL_CENTER_START_FAILED', err }, 'Control Center server failed to start');
+  vpsLineMonitor.stop();
+  clearInterval(serviceCheckInterval);
+  clearInterval(networkProbeInterval);
+  try {
+    db.close();
+  } catch {
+    // The process is already terminating after a startup failure.
+  }
   process.exit(1);
 }
 
 // Graceful shutdown
-process.on('SIGINT', () => {
-  fastify.close(() => {
-    db.close();
-    process.exit(0);
-  });
-});
+let shuttingDown = false;
 
-process.on('SIGTERM', () => {
-  fastify.close(() => {
+async function shutdown(signal: 'SIGINT' | 'SIGTERM'): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  fastify.log.info({ code: 'CONTROL_CENTER_SHUTDOWN_STARTED', signal }, 'Control Center shutdown started');
+  vpsLineMonitor.stop();
+  clearInterval(serviceCheckInterval);
+  clearInterval(networkProbeInterval);
+  try {
+    await fastify.close();
     db.close();
+    fastify.log.info({ code: 'CONTROL_CENTER_SHUTDOWN_COMPLETED', signal }, 'Control Center shutdown completed');
     process.exit(0);
-  });
-});
+  } catch (err) {
+    fastify.log.error({ code: 'CONTROL_CENTER_SHUTDOWN_FAILED', signal, err }, 'Control Center shutdown failed');
+    try {
+      db.close();
+    } catch {
+      // Preserve the original structured shutdown failure.
+    }
+    process.exit(1);
+  }
+}
+
+process.on('SIGINT', () => void shutdown('SIGINT'));
+process.on('SIGTERM', () => void shutdown('SIGTERM'));

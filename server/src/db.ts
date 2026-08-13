@@ -67,6 +67,30 @@ db.prepare('DELETE FROM service_checks WHERE checked_at < ?').run(cutoff);
 db.prepare('DELETE FROM net_probes WHERE probed_at < ?').run(cutoff);
 db.prepare('DELETE FROM net_group_stats WHERE computed_at < ?').run(cutoff);
 
+export function initializeVpsLineSampleStorage(database: Database.Database, nowMs = Date.now()): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS vps_line_samples (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      probed_at         INTEGER NOT NULL,
+      node_name         TEXT NOT NULL,
+      sent              INTEGER NOT NULL,
+      received          INTEGER NOT NULL,
+      median_latency_ms REAL,
+      p95_latency_ms    REAL,
+      jitter_ms         REAL,
+      tcp_state         TEXT NOT NULL CHECK (tcp_state IN ('up', 'down')),
+      icmp_usable       INTEGER NOT NULL CHECK (icmp_usable IN (0, 1))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_vps_line_samples_probed_at
+      ON vps_line_samples(probed_at);
+  `);
+  database.prepare('DELETE FROM vps_line_samples WHERE probed_at < ?')
+    .run(nowMs - THIRTY_DAYS_MS);
+}
+
+initializeVpsLineSampleStorage(db);
+
 // ---- Typed query functions ----
 
 export interface ServiceCheck {
@@ -147,6 +171,80 @@ export function getEvents(limit: number): EventRow[] {
 export interface GroupStat {
   avg_latency_ms: number | null;
   computed_at: number;
+}
+
+export interface VpsLineSampleRow {
+  id: number;
+  probedAt: number;
+  nodeName: string;
+  sent: number;
+  received: number;
+  medianLatencyMs: number | null;
+  p95LatencyMs: number | null;
+  jitterMs: number | null;
+  tcpState: 'up' | 'down';
+  icmpUsable: boolean;
+}
+
+export type VpsLineSampleInput = Omit<VpsLineSampleRow, 'id'>;
+
+type VpsLineSampleDatabaseRow = {
+  id: number;
+  probed_at: number;
+  node_name: string;
+  sent: number;
+  received: number;
+  median_latency_ms: number | null;
+  p95_latency_ms: number | null;
+  jitter_ms: number | null;
+  tcp_state: 'up' | 'down';
+  icmp_usable: number;
+};
+
+export function insertVpsLineSample(sample: VpsLineSampleInput, database: Database.Database = db): void {
+  database.prepare(`
+    INSERT INTO vps_line_samples (
+      probed_at, node_name, sent, received, median_latency_ms,
+      p95_latency_ms, jitter_ms, tcp_state, icmp_usable
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    sample.probedAt,
+    sample.nodeName,
+    sample.sent,
+    sample.received,
+    sample.medianLatencyMs,
+    sample.p95LatencyMs,
+    sample.jitterMs,
+    sample.tcpState,
+    sample.icmpUsable ? 1 : 0,
+  );
+}
+
+export function getVpsLineSamples(
+  nodeName: string,
+  sinceMs: number,
+  database: Database.Database = db,
+): VpsLineSampleRow[] {
+  const rows = database.prepare(`
+    SELECT id, probed_at, node_name, sent, received, median_latency_ms,
+           p95_latency_ms, jitter_ms, tcp_state, icmp_usable
+    FROM vps_line_samples
+    WHERE node_name = ? AND probed_at >= ?
+    ORDER BY probed_at ASC
+  `).all(nodeName, sinceMs) as VpsLineSampleDatabaseRow[];
+
+  return rows.map(row => ({
+    id: row.id,
+    probedAt: row.probed_at,
+    nodeName: row.node_name,
+    sent: row.sent,
+    received: row.received,
+    medianLatencyMs: row.median_latency_ms,
+    p95LatencyMs: row.p95_latency_ms,
+    jitterMs: row.jitter_ms,
+    tcpState: row.tcp_state,
+    icmpUsable: row.icmp_usable === 1,
+  }));
 }
 
 export function insertGroupStat(groupKey: string, avgLatencyMs: number | null): void {
