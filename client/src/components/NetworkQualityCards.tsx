@@ -6,11 +6,15 @@ import {
   buildVpsTooltip,
   clampTooltipCenterX,
   formatBucketInterval,
+  isolatedLatencyPoints,
   latencyBucketIndexAtX,
   latencyChartMaximum,
   latencyPath,
+  moveBucketSelection,
   packetLossColor,
+  vpsTooltipAccessibleText,
 } from './network-chart-utils.js';
+import { useElementWidth } from './use-element-width.js';
 
 const MONO = '"JetBrains Mono",monospace';
 const CARD = {
@@ -23,6 +27,10 @@ const PAD_LEFT = 40;
 const PAD_RIGHT = 12;
 const PAD_TOP = 14;
 const PAD_BOTTOM = 24;
+const VISUALLY_HIDDEN: React.CSSProperties = {
+  position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
+  overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0,
+};
 
 const RANGE_OPTIONS: Array<{ key: NetworkRange; label: string }> = [
   { key: '1h', label: '1 小时' },
@@ -30,20 +38,6 @@ const RANGE_OPTIONS: Array<{ key: NetworkRange; label: string }> = [
   { key: '24h', label: '24 小时' },
   { key: '7d', label: '7 天' },
 ];
-
-function useWidth(initial = 760): [React.RefObject<HTMLDivElement>, number] {
-  const ref = React.useRef<HTMLDivElement>(null);
-  const [width, setWidth] = React.useState(initial);
-  React.useEffect(() => {
-    if (!ref.current || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(entries => {
-      for (const entry of entries) setWidth(entry.contentRect.width);
-    });
-    observer.observe(ref.current);
-    return () => observer.disconnect();
-  }, []);
-  return [ref, width];
-}
 
 function numberText(value: number | null, unit = ''): string {
   if (value === null || !Number.isFinite(value)) return '—';
@@ -81,6 +75,7 @@ function TooltipShell({ left, children, width = 250 }: { left: number; children:
 
 export function NetworkStatusBar({
   overall, online, total, domesticAverage, internationalAverage, probedAt, range, onRangeChange,
+  loading, error, onRetry,
 }: {
   overall: number;
   online: number;
@@ -90,6 +85,9 @@ export function NetworkStatusBar({
   probedAt: number;
   range: NetworkRange;
   onRangeChange: (range: NetworkRange) => void;
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
 }) {
   const metrics = [
     { label: '整体可用率', value: `${overall.toFixed(1)}%`, color: overall >= 99.5 ? '#3fb950' : overall >= 93 ? '#d9a531' : '#f15a4a' },
@@ -111,9 +109,16 @@ export function NetworkStatusBar({
       <span style={{ fontSize: 9.5, color: '#5d6673', fontFamily: MONO, whiteSpace: 'nowrap' }}>
         探测于 {fmtAgo(probedAt)}
       </span>
+      {error ? (
+        <button type="button" onClick={onRetry} style={{ border: 0, padding: 0, background: 'transparent', color: '#d9a531', fontSize: 9.5, cursor: 'pointer', fontFamily: 'inherit' }}>
+          {error}，显示上次数据 · 重试
+        </button>
+      ) : (
+        <span role="status" aria-live="polite" style={{ color: '#5d6673', fontSize: 9.5 }}>{loading ? '正在更新…' : ''}</span>
+      )}
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 2, padding: 2, borderRadius: 8, flex: 'none', background: '#0c1016', border: '1px solid rgba(255,255,255,.08)' }}>
         {RANGE_OPTIONS.map(option => (
-          <button key={option.key} onClick={() => onRangeChange(option.key)} style={{
+          <button key={option.key} aria-pressed={range === option.key} onClick={() => onRangeChange(option.key)} style={{
             padding: '3px 8px', borderRadius: 6, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
             fontSize: 10.5, fontWeight: 600, background: range === option.key ? 'rgba(90,160,250,.18)' : 'transparent',
             color: range === option.key ? '#7fb4ff' : '#6b7482',
@@ -125,7 +130,7 @@ export function NetworkStatusBar({
 }
 
 export function GenericLatencyChart({ series }: { series: readonly LatencySeries[] }) {
-  const [ref, width] = useWidth();
+  const [ref, width] = useElementWidth(760);
   const [hover, setHover] = React.useState<{ index: number; pointerX: number } | null>(null);
   const innerWidth = Math.max(60, width - PAD_LEFT - PAD_RIGHT);
   const innerHeight = CHART_HEIGHT - PAD_TOP - PAD_BOTTOM;
@@ -140,7 +145,7 @@ export function GenericLatencyChart({ series }: { series: readonly LatencySeries
   const tooltipWidth = Math.min(250, Math.max(180, width - 16));
   const tooltipLeft = hover ? clampTooltipCenterX(hover.pointerX, tooltipWidth, width, 8) : 0;
 
-  const onMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+  const updateFromPointer = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!count) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const pointerX = event.clientX - bounds.left;
@@ -149,6 +154,17 @@ export function GenericLatencyChart({ series }: { series: readonly LatencySeries
       pointerX,
     });
   };
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const index = moveBucketSelection(hover?.index ?? null, event.key === 'ArrowLeft' ? -1 : 1, count);
+    if (index !== null) setHover({ index, pointerX: x(index) });
+  };
+
+  const accessibleText = hover && hoveredBucket
+    ? [formatBucketInterval(hoveredBucket.startAt, hoveredBucket.endAt), ...tooltipRows.map(row => `${row.label} ${row.value}`)].join('，')
+    : '使用左右方向键查看各时间桶延迟。';
 
   const tickIndexes = count ? [0, Math.floor((count - 1) / 2), count - 1] : [];
   return (
@@ -166,9 +182,16 @@ export function GenericLatencyChart({ series }: { series: readonly LatencySeries
       </div>
       <div
         ref={ref}
-        onMouseMove={onMouseMove}
-        onMouseLeave={() => setHover(null)}
-        style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden' }}
+        role="group"
+        tabIndex={0}
+        aria-label="延迟对比图，使用左右方向键查看同一时间桶的全部线路"
+        onPointerMove={updateFromPointer}
+        onPointerDown={event => { event.currentTarget.focus(); updateFromPointer(event); }}
+        onPointerLeave={() => setHover(null)}
+        onKeyDown={onKeyDown}
+        onFocus={() => { if (count && !hover) setHover({ index: count - 1, pointerX: x(count - 1) }); }}
+        onBlur={() => setHover(null)}
+        style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden', touchAction: 'pan-y' }}
       >
         <svg width={width} height={CHART_HEIGHT} style={{ display: 'block' }}>
           {[0, .25, .5, .75, 1].map(step => {
@@ -178,9 +201,12 @@ export function GenericLatencyChart({ series }: { series: readonly LatencySeries
               <text x={PAD_LEFT - 7} y={gridY + 3.5} textAnchor="end" fontSize="10" fill="#525a66" fontFamily={MONO}>{Math.round(step * maximum)}</text>
             </g>;
           })}
-          {series.map(item => (
-            <path key={item.id} d={latencyPath(item.buckets, x, y)} fill="none" stroke={item.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-          ))}
+          {series.map(item => <g key={item.id}>
+            <path d={latencyPath(item.buckets, x, y)} fill="none" stroke={item.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+            {isolatedLatencyPoints(item.buckets, x, y).map(point => (
+              <circle key={point.index} data-isolated-marker="true" cx={point.x} cy={point.y} r="3" fill={item.color} stroke="#10151d" strokeWidth="1" />
+            ))}
+          </g>)}
           {hover && <line x1={x(hover.index)} y1={PAD_TOP} x2={x(hover.index)} y2={PAD_TOP + innerHeight} stroke="rgba(230,237,243,.45)" strokeDasharray="3 3" />}
           {tickIndexes.map((index, position) => {
             const bucket = series.map(item => item.buckets[index]).find(value => value !== undefined);
@@ -190,6 +216,7 @@ export function GenericLatencyChart({ series }: { series: readonly LatencySeries
           })}
         </svg>
         {!count && <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#596270', fontSize: 11 }}>暂无延迟序列</div>}
+        <span role="status" aria-live="polite" style={VISUALLY_HIDDEN}>{accessibleText}</span>
         {hover && hoveredBucket && (
           <TooltipShell left={tooltipLeft} width={tooltipWidth}>
             <div style={{ color: '#9aa5b3', marginBottom: 5 }}>{formatBucketInterval(hoveredBucket.startAt, hoveredBucket.endAt)}</div>
@@ -226,7 +253,7 @@ function VpsEmptyState({ title, detail, tone = '#687382' }: { title: string; det
 }
 
 export function VpsLineCard({ response }: { response: VpsLineResponse | null }) {
-  const [ref, width] = useWidth();
+  const [ref, width] = useElementWidth(760);
   const [hover, setHover] = React.useState<{ index: number; pointerX: number } | null>(null);
   const measured = response?.status === 'available' || response?.status === 'accumulating' ? response : null;
   const qualityTone = measured ? QUALITY_TONE[measured.quality.state] : '#687382';
@@ -273,12 +300,19 @@ export function VpsLineCard({ response }: { response: VpsLineResponse | null }) 
   const tooltipWidth = Math.min(272, Math.max(180, width - 16));
   const tooltipLeft = hover ? clampTooltipCenterX(hover.pointerX, tooltipWidth, width, 8) : 0;
 
-  const onMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+  const updateFromPointer = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!count) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const pointerX = event.clientX - bounds.left;
     setHover({ index: latencyBucketIndexAtX(pointerX, bounds.width, PAD_LEFT, PAD_RIGHT, count), pointerX });
   };
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const index = moveBucketSelection(hover?.index ?? null, event.key === 'ArrowLeft' ? -1 : 1, count);
+    if (index !== null) setHover({ index, pointerX: x(index) });
+  };
+  const accessibleText = tooltip ? vpsTooltipAccessibleText(tooltip) : '使用左右方向键查看线路各时间桶详情。';
   const metrics = [
     { label: '当前中位延迟', value: numberText(lineData.current.medianLatencyMs, 'ms'), color: '#c5baff' },
     { label: '所选区间丢包', value: numberText(lineData.rangeSummary.lossPercent, '%'), color: lineData.rangeSummary.lossPercent === null ? '#687382' : packetLossColor(lineData.rangeSummary.lossPercent) },
@@ -306,7 +340,19 @@ export function VpsLineCard({ response }: { response: VpsLineResponse | null }) 
           <div style={{ color: metric.color, fontFamily: MONO, fontSize: 11.5, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{metric.value}</div>
         </div>)}
       </div>
-      <div ref={ref} onMouseMove={onMouseMove} onMouseLeave={() => setHover(null)} style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <div
+        ref={ref}
+        role="group"
+        tabIndex={0}
+        aria-label="搬瓦工私人线路质量图，使用左右方向键查看中位延迟、P95 延迟和丢包详情"
+        onPointerMove={updateFromPointer}
+        onPointerDown={event => { event.currentTarget.focus(); updateFromPointer(event); }}
+        onPointerLeave={() => setHover(null)}
+        onKeyDown={onKeyDown}
+        onFocus={() => { if (count && !hover) setHover({ index: count - 1, pointerX: x(count - 1) }); }}
+        onBlur={() => setHover(null)}
+        style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden', touchAction: 'pan-y' }}
+      >
         <svg width={width} height={CHART_HEIGHT} style={{ display: 'block' }}>
           {[0, .5, 1].map(step => {
             const gridY = PAD_TOP + latencyHeight - step * latencyHeight;
@@ -316,6 +362,9 @@ export function VpsLineCard({ response }: { response: VpsLineResponse | null }) 
             </g>;
           })}
           <path d={latencyPath(latencyBuckets, x, y)} fill="none" stroke="#9b8cfa" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+          {isolatedLatencyPoints(latencyBuckets, x, y).map(point => (
+            <circle key={point.index} data-isolated-marker="true" cx={point.x} cy={point.y} r="3" fill="#9b8cfa" stroke="#10151d" strokeWidth="1" />
+          ))}
           <text x={PAD_LEFT - 7} y={bandY + bandHeight - 1} textAnchor="end" fontSize="8" fill="#525a66" fontFamily={MONO}>loss</text>
           {buckets.map((bucket, index) => {
             const segmentWidth = innerWidth / Math.max(1, count);
@@ -328,6 +377,7 @@ export function VpsLineCard({ response }: { response: VpsLineResponse | null }) 
               fontSize="9" fill="#525a66" fontFamily={MONO}>{timestampTick(buckets[index]?.startAt)}</text>
           ))}
         </svg>
+        <span role="status" aria-live="polite" style={VISUALLY_HIDDEN}>{accessibleText}</span>
         {tooltip && hover && <TooltipShell left={tooltipLeft} width={tooltipWidth}>
           <div style={{ color: '#9aa5b3', marginBottom: 5 }}>{tooltip.interval}</div>
           {'message' in tooltip ? <div style={{ color: '#687382' }}>{tooltip.message}</div> : <>

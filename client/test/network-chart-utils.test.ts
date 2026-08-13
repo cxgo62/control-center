@@ -8,10 +8,13 @@ import {
   clampTooltipCenterX,
   latencyChartMaximum,
   latencyBucketIndexAtX,
+  isolatedLatencyPoints,
   latencyPath,
+  moveBucketSelection,
   packetLossColor,
   shouldCommitRangeResponse,
   shouldCommitLatestRequest,
+  vpsTooltipAccessibleText,
 } from '../src/components/network-chart-utils.js';
 
 const latencySeries: LatencySeries[] = [
@@ -158,6 +161,52 @@ test('builds generic chart paths with gaps for missing buckets while rendering z
     ],
   };
   assert.equal(latencyPath(explicitGap.buckets, index => index * 10, value => 100 - value), 'M0.0 90.0 M20.0 80.0');
+});
+
+test('returns visible markers for isolated 5-minute samples in 75-second buckets', () => {
+  const buckets = Array.from({ length: 9 }, (_, index) => ({
+    startAt: index * 75_000,
+    endAt: (index + 1) * 75_000,
+    latencyMs: index % 4 === 0 ? 20 + index : null,
+    hasData: index % 4 === 0,
+  }));
+
+  assert.deepEqual(
+    isolatedLatencyPoints(buckets, index => index * 10, value => 100 - value),
+    [
+      { index: 0, x: 0, y: 80 },
+      { index: 4, x: 40, y: 76 },
+      { index: 8, x: 80, y: 72 },
+    ],
+  );
+  assert.equal(latencyPath(buckets, index => index * 10, value => 100 - value), 'M0.0 80.0 M40.0 76.0 M80.0 72.0');
+});
+
+test('does not duplicate markers for samples already painted by a connected run', () => {
+  assert.deepEqual(
+    isolatedLatencyPoints(latencySeries[0].buckets, index => index * 10, value => 100 - value),
+    [],
+  );
+});
+
+test('moves a shared bucket selection with bounded keyboard navigation', () => {
+  assert.equal(moveBucketSelection(null, -1, 4), 3);
+  assert.equal(moveBucketSelection(null, 1, 4), 0);
+  assert.equal(moveBucketSelection(2, -1, 4), 1);
+  assert.equal(moveBucketSelection(2, 1, 4), 3);
+  assert.equal(moveBucketSelection(3, 1, 4), 3);
+  assert.equal(moveBucketSelection(0, -1, 4), 0);
+  assert.equal(moveBucketSelection(null, 1, 0), null);
+});
+
+test('exposes VPS P95 and lost/sent details as assistive text', () => {
+  const tooltip = buildVpsTooltip({
+    startAt: Date.UTC(2026, 7, 14, 0, 5), endAt: Date.UTC(2026, 7, 14, 0, 10),
+    hasData: true, medianLatencyMs: 30, p95LatencyMs: 52, sent: 10, lost: 2,
+    lossPercent: 20, jitterMs: 3, tcpState: 'up',
+  });
+  assert.match(vpsTooltipAccessibleText(tooltip), /P95 延迟 52ms/);
+  assert.match(vpsTooltipAccessibleText(tooltip), /丢失 \/ 发送 2\/10/);
 });
 
 test('scales across every finite non-null latency and safely handles empty data', () => {

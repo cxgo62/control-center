@@ -7,6 +7,12 @@ export type LatencyTooltipRow = {
   value: string;
 };
 
+export type IsolatedLatencyPoint = {
+  index: number;
+  x: number;
+  y: number;
+};
+
 export type VpsTooltipViewModel =
   | { interval: string; message: '该时段无探测数据' }
   | {
@@ -133,6 +139,29 @@ export function latencyPath(
   return path;
 }
 
+function hasFiniteLatency(bucket: LatencyBucket | undefined): bucket is LatencyBucket & { latencyMs: number } {
+  return Boolean(bucket?.hasData && bucket.latencyMs !== null && Number.isFinite(bucket.latencyMs));
+}
+
+/** Returns samples whose one-point run cannot be painted by an SVG stroke path. */
+export function isolatedLatencyPoints(
+  buckets: readonly LatencyBucket[],
+  xForIndex: (index: number) => number,
+  yForValue: (value: number) => number,
+): IsolatedLatencyPoint[] {
+  return buckets.flatMap((bucket, index) => {
+    if (!hasFiniteLatency(bucket) || hasFiniteLatency(buckets[index - 1]) || hasFiniteLatency(buckets[index + 1])) return [];
+    return [{ index, x: xForIndex(index), y: yForValue(bucket.latencyMs) }];
+  });
+}
+
+/** Moves a chart's shared bucket cursor without wrapping beyond either edge. */
+export function moveBucketSelection(currentIndex: number | null, delta: -1 | 1, bucketCount: number): number | null {
+  if (bucketCount <= 0) return null;
+  if (currentIndex === null) return delta < 0 ? bucketCount - 1 : 0;
+  return clamp(currentIndex + delta, 0, bucketCount - 1);
+}
+
 export function packetLossColor(lossPercent: number | null): string {
   if (lossPercent === null || !Number.isFinite(lossPercent)) return 'rgba(255,255,255,.10)';
   if (lossPercent < 1) return '#3fb950';
@@ -170,6 +199,19 @@ export function buildVpsTooltip(bucket: VpsLineBucket): VpsTooltipViewModel {
     jitter: formatMilliseconds(bucket.jitterMs),
     tcp: bucket.tcpState,
   };
+}
+
+export function vpsTooltipAccessibleText(tooltip: VpsTooltipViewModel): string {
+  if ('message' in tooltip) return `${tooltip.interval}，${tooltip.message}`;
+  return [
+    tooltip.interval,
+    `中位延迟 ${tooltip.medianLatency}`,
+    `P95 延迟 ${tooltip.p95Latency}`,
+    `丢包率 ${tooltip.lossPercent}`,
+    `丢失 / 发送 ${tooltip.lostSent}`,
+    `抖动 ${tooltip.jitter}`,
+    `TCP ${tooltip.tcp}`,
+  ].join('，');
 }
 
 /** Keeps a centered tooltip fully inside its card, including a small card-edge gutter. */

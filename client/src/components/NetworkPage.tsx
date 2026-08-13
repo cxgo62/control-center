@@ -6,6 +6,7 @@ import { cardHoverPosition, formatBucketTooltip } from './uptime-bar-tooltip.js'
 import { formatShanghaiResetTime, formatTrafficBytes, formatUsagePercent } from './kiwivm-format.js';
 import { averageLatencyForSeries, shouldCommitLatestRequest, shouldCommitRangeResponse } from './network-chart-utils.js';
 import { GenericLatencyChart, NetworkStatusBar, VpsLineCard } from './NetworkQualityCards.js';
+import { useElementWidth } from './use-element-width.js';
 
 const NET_RANGES = [
   { key: '1h',  label: '1 小时',  ticks: ['-60分', '-45分', '-30分', '-15分', '现在'] },
@@ -17,21 +18,6 @@ const NET_RANGES = [
 function availColor(a: number): string {
   return a >= 99.5 ? '#3fb950' : a >= 98 ? '#7bcf4f' : a >= 93 ? '#d9a531' : '#f15a4a';
 }
-
-function useElementWidth(initial: number): [React.RefObject<HTMLDivElement>, number] {
-  const ref = React.useRef<HTMLDivElement>(null);
-  const [width, setWidth] = React.useState(initial);
-  React.useEffect(() => {
-    if (!ref.current || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(entries => {
-      for (const entry of entries) setWidth(entry.contentRect.width);
-    });
-    observer.observe(ref.current);
-    return () => observer.disconnect();
-  });
-  return [ref, width];
-}
-
 
 // ---- Uptime bar ----
 interface UptimeBarProps {
@@ -663,6 +649,8 @@ type PingResult = Record<string, Record<string, { up: boolean; latencyMs: number
 export function NetworkPage() {
   const [range, setRange] = React.useState<NetworkRange>('1h');
   const [data, setData] = React.useState<NetworkData | null>(null);
+  const [dataLoading, setDataLoading] = React.useState(true);
+  const [dataError, setDataError] = React.useState<string | null>(null);
   const [vpsLine, setVpsLine] = React.useState<VpsLineResponse | null>(null);
   const [ping, setPing] = React.useState<PingResult | null>(null); // 实时探测结果（不入库）
   const [probing, setProbing] = React.useState(false);
@@ -677,19 +665,27 @@ export function NetworkPage() {
   const fetchData = React.useCallback(async (r: NetworkRange) => {
     if (r !== selectedRangeRef.current) return;
     const requestId = ++dataRequestIdRef.current;
+    setDataLoading(true);
+    setDataError(null);
     try {
       const result = await api.getNetworkData(r);
       if (shouldCommitRangeResponse(r, selectedRangeRef.current, requestId, dataRequestIdRef.current)) {
         setData(result);
+        setDataError(null);
       }
     } catch {
-      // ignore errors silently
+      if (shouldCommitRangeResponse(r, selectedRangeRef.current, requestId, dataRequestIdRef.current)) {
+        setDataError('网络数据更新失败');
+      }
+    } finally {
+      if (shouldCommitRangeResponse(r, selectedRangeRef.current, requestId, dataRequestIdRef.current)) {
+        setDataLoading(false);
+      }
     }
   }, []);
 
   // Initial fetch + on range change
   React.useEffect(() => {
-    setData(null);
     fetchData(range);
   }, [range, fetchData]);
 
@@ -788,7 +784,12 @@ export function NetworkPage() {
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: '#525a66', fontSize: 14, fontFamily: 'system-ui,sans-serif',
       }}>
-        正在加载网络数据…
+        {dataError ? (
+          <div role="alert" style={{ textAlign: 'center' }}>
+            <div style={{ color: '#d9a531', marginBottom: 10 }}>{dataError}</div>
+            <button type="button" onClick={() => fetchData(range)} style={{ border: '1px solid rgba(127,180,255,.35)', borderRadius: 7, background: 'rgba(90,160,250,.12)', color: '#7fb4ff', padding: '6px 12px', cursor: 'pointer' }}>重试</button>
+          </div>
+        ) : '正在加载网络数据…'}
       </div>
     );
   }
@@ -871,6 +872,7 @@ export function NetworkPage() {
           overall={overall} online={onN} total={allT.length}
           domesticAverage={dAvg} internationalAverage={pAvg}
           probedAt={data.probedAt} range={range} onRangeChange={setRange}
+          loading={dataLoading} error={dataError} onRetry={() => fetchData(range)}
         />
 
         <NetRegionCard
