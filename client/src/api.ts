@@ -1,3 +1,5 @@
+import type { NetworkData, NetworkRange, VpsLineResponse } from './types.js';
+
 export type ClashStatus =
   | {
       available: true;
@@ -63,7 +65,11 @@ export const api = {
     return fetch(`/api/services/${id}/logs?${q}`).then(r => r.json());
   },
   getNetworkData: (range: string) =>
-    fetch(`/api/network/data?range=${range}`).then(r => r.json()),
+    fetch(`/api/network/data?range=${encodeURIComponent(range)}`).then(r => r.json()) as Promise<NetworkData>,
+  getVpsLine: (range: NetworkRange) => {
+    const query = new URLSearchParams({ range });
+    return fetch(`/api/network/vps-line?${query}`).then(r => r.json()) as Promise<VpsLineResponse>;
+  },
   probeNetwork: () =>
     fetch('/api/network/probe', { method: 'POST' }).then(r => r.json()),
   pingNetwork: () =>

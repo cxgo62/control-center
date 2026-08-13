@@ -894,8 +894,17 @@ export function NetworkPage() {
   const overall = allT.length > 0 ? allT.reduce((a, t) => a + t.avail, 0) / allT.length : 0;
   const onN = allT.filter(t => t.up).length;
   const avg = (arr: number[]) => { const v = arr.filter(x => x > 0); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : 0; };
-  const dAvg = avg(data.lineDomestic);
-  const pAvg = avg(data.lineInternational);
+  // Temporary compatibility for the legacy two-line component. The normalized API
+  // promises configured order; 0 is already a visual gap in the legacy renderer,
+  // so both absent and null buckets remain gaps rather than successful points.
+  // Task 6 replaces this bridge with generic latencySeries rendering.
+  const legacyLatencyLines = data.latencySeries.slice(0, 2).map(series =>
+    series.buckets.map(bucket => bucket.hasData && bucket.latencyMs !== null ? bucket.latencyMs : 0)
+  );
+  const lineDomestic = legacyLatencyLines[0] ?? [];
+  const lineInternational = legacyLatencyLines[1] ?? [];
+  const dAvg = avg(lineDomestic);
+  const pAvg = avg(lineInternational);
 
   // 将实时 ping 结果覆盖到目标的当前状态（不影响历史桶和可用率）
   const applyPing = (targets: typeof data.direct, path: 'direct' | 'proxy') =>
@@ -980,7 +989,7 @@ export function NetworkPage() {
             </div>
           </div>
           <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-            <NetLineChart lineDirect={data.lineDomestic} lineProxy={data.lineInternational} ticks={rangeInfo.ticks} />
+            <NetLineChart lineDirect={lineDomestic} lineProxy={lineInternational} ticks={rangeInfo.ticks} />
           </div>
         </div>
 
