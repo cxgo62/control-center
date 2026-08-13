@@ -22,6 +22,16 @@ export const unavailableClashStatus: ClashStatus = {
   },
 };
 
+export function clashVergeConfigPath(homeDirectory: string): string {
+  return path.join(
+    homeDirectory,
+    'Library',
+    'Application Support',
+    'io.github.clash-verge-rev.clash-verge-rev',
+    'clash-verge.yaml',
+  );
+}
+
 function unquote(value: string): string {
   const trimmed = value.trim();
   if (
@@ -66,3 +76,4 @@ export function parseClashVergeConfig(content: string): ClashStatus {
     tunStack,
   };
 }
+import path from 'path';

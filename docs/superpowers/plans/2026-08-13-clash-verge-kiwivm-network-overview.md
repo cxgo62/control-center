@@ -86,7 +86,7 @@ Expected: all focused tests PASS.
 In `server/src/routes/network.ts`:
 
 - replace `GET /api/flclash` with `GET /api/network/clash`;
-- read `~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/config.yaml`;
+- read `~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/clash-verge.yaml`, whose generated TUN block includes the explicit `enable` flag;
 - pass text to `parseClashVergeConfig`;
 - return `unavailableClashStatus` on filesystem errors;
 - log a sanitized structured warning through `fastify.log.warn({ code: 'CLASH_CONFIG_UNAVAILABLE' }, 'Clash Verge config unavailable')` without the filesystem error object or source content;

@@ -1,6 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseClashVergeConfig, unavailableClashStatus } from '../src/routes/clash-status.js';
+import {
+  clashVergeConfigPath,
+  parseClashVergeConfig,
+  unavailableClashStatus,
+} from '../src/routes/clash-status.js';
+
+test('Clash Verge status reads the generated config containing the TUN enabled flag', () => {
+  assert.equal(
+    clashVergeConfigPath('/Users/example'),
+    '/Users/example/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/clash-verge.yaml',
+  );
+});
 
 test('Clash Verge parser returns only the allowed status fields', () => {
   assert.deepEqual(parseClashVergeConfig(`

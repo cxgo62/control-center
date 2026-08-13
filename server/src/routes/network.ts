@@ -1,13 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { readFileSync } from 'fs';
 import { homedir } from 'os';
-import path from 'path';
 import { fileURLToPath } from 'url';
 import { NET_TARGETS } from '../config.js';
 import { getNetProbes, getGroupStats, getSetting, setSetting, type NetProbe } from '../db.js';
 import { probeAll, probeTarget, getActiveProxyUrl } from '../prober.js';
 import { createLivePingEntry, latestProbedAt, latestProbeForTarget } from './network-utils.js';
-import { parseClashVergeConfig, unavailableClashStatus } from './clash-status.js';
+import { clashVergeConfigPath, parseClashVergeConfig, unavailableClashStatus } from './clash-status.js';
 import { createKiwiVmTrafficClient, createKiwiVmTrafficHandler } from './kiwivm-traffic.js';
 
 const NET_BUCKETS = 48;
@@ -211,11 +210,7 @@ export default async function networkRoutes(fastify: FastifyInstance) {
   // GET /api/network/clash — 读取 Clash Verge 运行配置
   fastify.get('/api/network/clash', async () => {
     try {
-      const configPath = path.join(
-        homedir(), 'Library', 'Application Support',
-        'io.github.clash-verge-rev.clash-verge-rev', 'config.yaml'
-      );
-      const content = readFileSync(configPath, 'utf-8');
+      const content = readFileSync(clashVergeConfigPath(homedir()), 'utf-8');
       return parseClashVergeConfig(content);
     } catch {
       fastify.log.warn(

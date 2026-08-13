@@ -12,7 +12,7 @@ This change is limited to the existing Control Center network sidebar and its se
 
 - Replace the private client/server `FlClash` naming with `Clash Verge` naming.
 - The server reads:
-  `~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/config.yaml`.
+  `~/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/clash-verge.yaml`. This generated file includes the explicit `tun.enable` value; the sibling effective `config.yaml` on the current Clash Verge version omits that flag even when TUN is enabled.
 - Parse and return only these operational fields:
   - `mixedPort`
   - `mode`
