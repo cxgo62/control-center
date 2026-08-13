@@ -146,7 +146,15 @@ export function shouldCommitRangeResponse(
   requestId: number,
   latestRequestId: number,
 ): boolean {
-  return requestedRange === currentRange && requestId === latestRequestId;
+  return requestedRange === currentRange && shouldCommitLatestRequest(requestId, latestRequestId);
+}
+
+export function shouldCommitLatestRequest(
+  requestId: number,
+  latestRequestId: number,
+  active = true,
+): boolean {
+  return active && requestId === latestRequestId;
 }
 
 /** Builds the shared latency/loss tooltip content for one VPS bucket. */

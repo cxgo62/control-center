@@ -69,13 +69,12 @@ function bucketCenterX(index: number, count: number, innerWidth: number): number
 
 function TooltipShell({ left, children, width = 250 }: { left: number; children: React.ReactNode; width?: number }) {
   return (
-    <div onMouseMove={event => event.stopPropagation()} style={{
+    <div style={{
       position: 'absolute', left, top: 10, transform: 'translateX(-50%)', width,
-      boxSizing: 'border-box', pointerEvents: 'auto', zIndex: 4,
+      boxSizing: 'border-box', pointerEvents: 'none', zIndex: 4,
       background: '#252d3b', border: '1px solid rgba(255,255,255,.16)', borderRadius: 8,
       padding: '9px 11px', color: '#e6edf3', fontSize: 10.5, lineHeight: 1.45,
       fontFamily: MONO, boxShadow: '0 10px 24px rgba(0,0,0,.42)',
-      maxHeight: 'calc(100% - 20px)', overflowY: 'auto',
     }}>{children}</div>
   );
 }

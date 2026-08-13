@@ -4,7 +4,7 @@ import { api, type ClashStatus, type KiwiVmTrafficResponse, type KiwiVmTrafficSu
 import { StatusDot, ToastStack, useToast, fmtAgo } from './Shared.js';
 import { cardHoverPosition, formatBucketTooltip } from './uptime-bar-tooltip.js';
 import { formatShanghaiResetTime, formatTrafficBytes, formatUsagePercent } from './kiwivm-format.js';
-import { averageLatencyForSeries, shouldCommitRangeResponse } from './network-chart-utils.js';
+import { averageLatencyForSeries, shouldCommitLatestRequest, shouldCommitRangeResponse } from './network-chart-utils.js';
 import { GenericLatencyChart, NetworkStatusBar, VpsLineCard } from './NetworkQualityCards.js';
 
 const NET_RANGES = [
@@ -418,7 +418,7 @@ function NetworkSidebar({ onProbe, probing, domestic, international }: NetworkSi
 
   return (
     <>
-      <div style={{
+      <div className="network-sidebar" style={{
         width: 300, flex: 'none',
         background: '#10151d', border: '1px solid rgba(255,255,255,.07)',
         borderRadius: 16, padding: '16px 16px',
@@ -669,6 +669,7 @@ export function NetworkPage() {
   const [, tick] = React.useState(0);
   const selectedRangeRef = React.useRef<NetworkRange>(range);
   const dataRequestIdRef = React.useRef(0);
+  const vpsRequestIdRef = React.useRef(0);
   const [contentRef, contentWidth] = useElementWidth(900);
   selectedRangeRef.current = range;
   const toast = useToast();
@@ -703,11 +704,12 @@ export function NetworkPage() {
     let alive = true;
     setVpsLine(null);
     const load = async () => {
+      const requestId = ++vpsRequestIdRef.current;
       try {
         const response = await api.getVpsLine(range);
-        if (alive) setVpsLine(response);
+        if (shouldCommitLatestRequest(requestId, vpsRequestIdRef.current, alive)) setVpsLine(response);
       } catch {
-        if (alive) setVpsLine({
+        if (shouldCommitLatestRequest(requestId, vpsRequestIdRef.current, alive)) setVpsLine({
           status: 'error', displayLabel: '搬瓦工私人线路',
           error: { code: 'VPS_LINE_DATA_UNAVAILABLE', message: '线路数据暂时不可用' },
         });
@@ -715,7 +717,11 @@ export function NetworkPage() {
     };
     load();
     const timer = setInterval(load, 60_000);
-    return () => { alive = false; clearInterval(timer); };
+    return () => {
+      alive = false;
+      ++vpsRequestIdRef.current;
+      clearInterval(timer);
+    };
   }, [range]);
 
   // 前台实时 ping：页面可见时每 10s 探一次，结果不入库，仅覆盖当前显示的延迟和状态
@@ -815,11 +821,33 @@ export function NetworkPage() {
   };
 
   return (
-    <div style={{
+    <div className="network-page-shell" style={{
       width: '100%', height: '100%',
       background: '#0b0e14', color: '#e6edf3', fontFamily: 'system-ui,sans-serif',
       display: 'flex', gap: 16, padding: 20, boxSizing: 'border-box', overflow: 'hidden',
     }}>
+      <style>{`
+        @media (max-width: 820px) {
+          .network-page-shell {
+            flex-direction: column;
+            overflow-y: auto !important;
+            padding: 12px !important;
+          }
+          .network-sidebar {
+            width: auto !important;
+            overflow-y: visible !important;
+          }
+          .network-content {
+            flex: none !important;
+            overflow-y: visible !important;
+            grid-template-columns: minmax(0, 1fr) !important;
+            grid-template-rows: auto repeat(4, minmax(300px, auto)) !important;
+          }
+        }
+        @media (max-width: 520px) {
+          .network-page-shell { padding: 8px !important; gap: 10px !important; }
+        }
+      `}</style>
       {/* Left sidebar */}
       <NetworkSidebar
         onProbe={handleProbe}
@@ -829,7 +857,7 @@ export function NetworkPage() {
       />
 
       {/* Compact status row + two content rows */}
-      <div ref={contentRef} style={{
+      <div ref={contentRef} className="network-content" style={{
         flex: 1, minWidth: 0,
         display: 'grid',
         gridTemplateColumns: narrowContent ? 'minmax(0,1fr)' : 'minmax(260px,1fr) minmax(0,2fr)',

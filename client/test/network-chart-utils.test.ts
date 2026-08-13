@@ -11,6 +11,7 @@ import {
   latencyPath,
   packetLossColor,
   shouldCommitRangeResponse,
+  shouldCommitLatestRequest,
 } from '../src/components/network-chart-utils.js';
 
 const latencySeries: LatencySeries[] = [
@@ -176,4 +177,10 @@ test('commits only the latest response for the currently selected range', () => 
   assert.equal(shouldCommitRangeResponse('1h', '1h', 4, 4), true);
   assert.equal(shouldCommitRangeResponse('7d', '1h', 4, 4), false);
   assert.equal(shouldCommitRangeResponse('1h', '1h', 3, 4), false);
+});
+
+test('commits only the latest active polling request', () => {
+  assert.equal(shouldCommitLatestRequest(5, 5, true), true);
+  assert.equal(shouldCommitLatestRequest(4, 5, true), false);
+  assert.equal(shouldCommitLatestRequest(5, 5, false), false);
 });
