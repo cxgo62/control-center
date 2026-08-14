@@ -186,10 +186,11 @@ export async function checkService(svc: ServiceConfig): Promise<ServiceStatus> {
 }
 
 export async function checkAllServices(): Promise<ServiceStatus[]> {
-  const results = await Promise.allSettled(SERVICES.map(svc => checkService(svc)));
+  const managedServices = SERVICES.filter(svc => !svc.monitor);
+  const results = await Promise.allSettled(managedServices.map(svc => checkService(svc)));
   return results.map((r, i) => {
     if (r.status === 'fulfilled') return r.value;
-    return { id: SERVICES[i].id, status: 'error' as const, latencyMs: 0, checkedAt: Date.now() };
+    return { id: managedServices[i].id, status: 'error' as const, latencyMs: 0, checkedAt: Date.now() };
   });
 }
 

@@ -48,6 +48,14 @@ export interface IStoreOSMonitorOptions {
   persist: (serviceId: string, status: IStoreOSProbeResult['status'], latencyMs: number | null) => void;
   now?: () => number;
   intervalMs?: number;
+  onResult?: (result: IStoreOSProbeResult) => void;
+}
+
+export interface IStoreOSMonitor {
+  probe: () => Promise<IStoreOSProbeResult>;
+  getLatest: () => IStoreOSProbeResult;
+  start: () => void;
+  stop: () => void;
 }
 
 const promisifiedExecFile = promisify(execFile) as unknown as (
@@ -155,6 +163,7 @@ export function createIStoreOSMonitor(options: IStoreOSMonitorOptions) {
       } catch {
         // A persistence failure must not turn a completed device probe into an unknown state.
       }
+      options.onResult?.(next);
       return next;
     })().finally(() => {
       inFlight = null;
@@ -163,7 +172,7 @@ export function createIStoreOSMonitor(options: IStoreOSMonitorOptions) {
     return inFlight;
   };
 
-  return {
+  const monitor: IStoreOSMonitor = {
     probe,
     getLatest: () => latest,
     start: () => {
@@ -177,4 +186,5 @@ export function createIStoreOSMonitor(options: IStoreOSMonitorOptions) {
       timer = null;
     },
   };
+  return monitor;
 }

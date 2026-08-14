@@ -5,7 +5,7 @@ import { homedir } from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { VPS_LINE_NODE_NAME } from './config.js';
-import { db } from './db.js';
+import { db, insertServiceCheck } from './db.js';
 import servicesRoutes, { updateServiceStatus } from './routes/services.js';
 import networkRoutes from './routes/network.js';
 import { checkAllServices } from './checker.js';
@@ -13,6 +13,7 @@ import { probeAll } from './prober.js';
 import { fastifyLoggerOptions } from './logger.js';
 import { clashVergeConfigPath } from './routes/clash-status.js';
 import { createVpsLineMonitor } from './vps-line/monitor.js';
+import { createIStoreOSMonitor } from './istoreos-monitor.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,13 +27,28 @@ const vpsLineMonitor = createVpsLineMonitor({
   logger: fastify.log,
 });
 
+const istoreosMonitor = createIStoreOSMonitor({
+  persist: insertServiceCheck,
+  onResult: result => {
+    fastify.log.info({
+      code: 'ISTOREOS_PROBE_COMPLETED',
+      state: result.state,
+      sshOk: result.sshOk,
+      xrayOk: result.xrayOk,
+      proxyOk: result.proxyOk,
+      latencyMs: result.proxyLatencyMs,
+      checkedAt: result.checkedAt ? new Date(result.checkedAt).toISOString() : null,
+    }, 'iStoreOS probe completed');
+  },
+});
+
 // Register CORS (allow all in dev)
 await fastify.register(cors, {
   origin: true,
 });
 
 // Register route plugins
-await fastify.register(servicesRoutes);
+await fastify.register(servicesRoutes, { istoreosMonitor });
 await fastify.register(networkRoutes, { vpsLineMonitor });
 
 // In production, serve the client build
@@ -86,12 +102,15 @@ const networkProbeInterval = setInterval(() => void runNetworkProbes(), 60_000);
 
 // Start server
 try {
+  istoreosMonitor.start();
+  fastify.log.info({ code: 'ISTOREOS_MONITOR_STARTED', intervalMs: 5 * 60_000 }, 'iStoreOS monitor started');
   await vpsLineMonitor.start();
   const port = parseInt(process.env.PORT ?? '9000');
   await fastify.listen({ port, host: '0.0.0.0' });
   fastify.log.info({ code: 'CONTROL_CENTER_STARTED', port }, 'Control Center server started');
 } catch (err) {
   fastify.log.error({ code: 'CONTROL_CENTER_START_FAILED', err }, 'Control Center server failed to start');
+  istoreosMonitor.stop();
   vpsLineMonitor.stop();
   clearInterval(serviceCheckInterval);
   clearInterval(networkProbeInterval);
@@ -110,6 +129,7 @@ async function shutdown(signal: 'SIGINT' | 'SIGTERM'): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   fastify.log.info({ code: 'CONTROL_CENTER_SHUTDOWN_STARTED', signal }, 'Control Center shutdown started');
+  istoreosMonitor.stop();
   vpsLineMonitor.stop();
   clearInterval(serviceCheckInterval);
   clearInterval(networkProbeInterval);
