@@ -1,7 +1,7 @@
 export type ServiceStatus = 'running' | 'stopped' | 'error' | 'restarting' | 'starting' | 'stopping';
 export type ServiceGroup = 'infra' | 'app';
 
-export interface ServiceInfo {
+export interface ServiceInfoBase {
   id: string;
   name: string;
   group: ServiceGroup;
@@ -22,6 +22,29 @@ export interface ServiceInfo {
     tone?: string;  // 'mute' | 'warn' | 'danger' | 'blue' | 'go', default 'mute'
   }>;
 }
+
+export interface IStoreOSMonitorInfo {
+  state: 'checking' | 'healthy' | 'proxy_error' | 'offline';
+  status: 'running' | 'error' | 'stopped';
+  sshOk: boolean;
+  xrayOk: boolean | null;
+  proxyOk: boolean | null;
+  proxyLatencyMs: number | null;
+  checkedAt: number | null;
+  latencyMs: number;
+}
+
+export interface StandardServiceInfo extends ServiceInfoBase {
+  kind?: undefined;
+  monitor?: undefined;
+}
+
+export interface IStoreOSServiceInfo extends ServiceInfoBase {
+  kind: 'istoreos';
+  monitor: IStoreOSMonitorInfo;
+}
+
+export type ServiceInfo = StandardServiceInfo | IStoreOSServiceInfo;
 
 export interface Event {
   id: number;

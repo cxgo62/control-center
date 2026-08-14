@@ -1,4 +1,4 @@
-import type { NetworkData, NetworkRange, VpsLineResponse } from './types.js';
+import type { NetworkData, NetworkRange, ServiceInfo, VpsLineResponse } from './types.js';
 import { apiPath } from './control-center-paths.js';
 
 export type ClashStatus =
@@ -52,7 +52,7 @@ export type KiwiVmTrafficResponse =
     };
 
 export const api = {
-  getServices: () => fetch(apiPath('/services', import.meta.env.BASE_URL)).then(r => r.json()),
+  getServices: () => fetch(apiPath('/services', import.meta.env.BASE_URL)).then(r => r.json()) as Promise<ServiceInfo[]>,
   getEvents: () => fetch(apiPath('/events', import.meta.env.BASE_URL)).then(r => r.json()),
   serviceAction: (id: string, action: string) =>
     fetch(apiPath(`/services/${id}/action`, import.meta.env.BASE_URL), {
