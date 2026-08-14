@@ -28,7 +28,7 @@ test('parses only the allowlisted Xray and SOCKS proxy fields', () => {
     proxyOk: false,
     proxyLatencyMs: 500,
   });
-  assert.equal(parseIStoreOSProbeOutput('vless://secret\n'), null);
+  assert.equal(parseIStoreOSProbeOutput('secret-diagnostic\n'), null);
 });
 
 test('builds a fixed SSH command with safe identity and timeout options', () => {
@@ -90,7 +90,7 @@ test('maps a live router with a broken proxy to proxy_error', async () => {
 
 test('maps SSH failures to offline without exposing child-process diagnostics', async () => {
   const monitor = createIStoreOSMonitor({
-    execFile: async () => { throw new Error('ssh secret-endpoint vless://credential'); },
+    execFile: async () => { throw new Error('ssh secret-endpoint secret-diagnostic'); },
     persist: () => undefined,
   });
 
@@ -107,7 +107,7 @@ test('maps SSH failures to offline without exposing child-process diagnostics', 
     latencyMs: 0,
   });
   assert.equal(JSON.stringify(result).includes('secret-endpoint'), false);
-  assert.equal(JSON.stringify(result).includes('vless://'), false);
+  assert.equal(JSON.stringify(result).includes('secret-diagnostic'), false);
 });
 
 test('coalesces concurrent probes into one in-flight SSH operation', async () => {
