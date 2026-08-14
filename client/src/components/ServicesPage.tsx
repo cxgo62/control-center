@@ -12,6 +12,7 @@ import {
   SERVICE_CARD_HEADER_HEIGHT,
   SERVICE_CARD_METRICS_HEIGHT,
 } from './service-card-layout.js';
+import { IStoreOSCard, isIStoreOSService } from './istoreos-card.js';
 
 // Group definitions (local since we can't import from config)
 const CC_GROUPS: Record<string, { key: string; label: string; desc: string }> = {
@@ -155,7 +156,9 @@ function C_Section({ group, items, onAction, onLogs, onToast }: CSectionProps) {
         display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))',
         gridAutoRows: SERVICE_CARD_HEIGHT, alignItems: 'stretch', gap: 14,
       }}>
-        {items.map(s => (
+        {items.map(s => isIStoreOSService(s) ? (
+          <IStoreOSCard key={s.id} service={s} onAction={onAction} onToast={onToast} />
+        ) : (
           <C_Card key={s.id} svc={s} onAction={onAction} onLogs={onLogs} onToast={onToast} />
         ))}
       </div>
