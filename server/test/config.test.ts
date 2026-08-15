@@ -2,6 +2,21 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SERVICES } from '../src/config.js';
 
+test('registers iStoreOS as the first read-only network infrastructure service', () => {
+  assert.deepEqual(SERVICES[0], {
+    id: 'istoreos-router',
+    name: 'iStoreOS 软路由',
+    group: 'infra',
+    tech: 'iStoreOS 21.02.3 · PassWall2 / Xray',
+    checkUrl: 'http://192.168.31.10/',
+    port: 'SSH :22 · SOCKS :1070',
+    addr: '192.168.31.10',
+    url: 'http://192.168.31.10/',
+    monitor: { kind: 'istoreos' },
+    readOnly: true,
+  });
+});
+
 test('registers the Phenology backup worker as a monitored personal app', () => {
   const service = SERVICES.find(candidate => candidate.id === 'phenology-backup');
   assert.deepEqual(service, {
