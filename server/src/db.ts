@@ -54,6 +54,7 @@ db.exec(`
 // Create indexes for performance
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_service_checks_service_id ON service_checks(service_id);
+  CREATE INDEX IF NOT EXISTS idx_service_checks_service_id_checked_at ON service_checks(service_id, checked_at);
   CREATE INDEX IF NOT EXISTS idx_service_checks_checked_at ON service_checks(checked_at);
   CREATE INDEX IF NOT EXISTS idx_net_probes_probed_at ON net_probes(probed_at);
   CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
